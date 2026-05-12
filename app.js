@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged
+  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
