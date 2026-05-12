@@ -12,7 +12,7 @@ const DEFAULT_SUBJECTS = ['英語','数学','国語','社会','理科','情報',
 const DEFAULT_LABELS = ['自習','学校','学校課題','塾','塾宿題','授業','単語帳','テスト勉強','受験勉強','その他'];
 
 const firebaseConfig = {
-  apiKey: 'REPLACE_ME', authDomain: 'REPLACE_ME', projectId: 'REPLACE_ME', storageBucket: 'REPLACE_ME', messagingSenderId: 'REPLACE_ME', appId: 'REPLACE_ME'
+  apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
 };
 
 const app = initializeApp(firebaseConfig);
