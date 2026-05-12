@@ -129,14 +129,21 @@ function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.cla
 async function refresh(){ await loadAll(); ['dashboard','record','list','manage','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); }
 
 $('#appTitle').textContent = APP_NAME;
-$('#loginBtn').onclick=()=>signInWithRedirect(auth,new GoogleAuthProvider());
+$('#loginBtn').onclick = async () => {
+  try {
+    console.log('start Google login');
+    const result = await signInWithPopup(auth, new GoogleAuthProvider());
+    console.log('login success', result.user?.email);
+  } catch (error) {
+    console.error('login failed', error);
+    alert(`ログイン失敗: ${error.code}\n${error.message}`);
+  }
+};
 $('#logoutBtn').onclick=()=>signOut(auth);
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
-getRedirectResult(auth).catch((err) => {
-  console.error('Redirect login failed:', err);
-  alert('ログイン処理でエラーが発生しました。時間をおいて再試行してください。');
-});
+
 onAuthStateChanged(auth, async user=>{
+  console.log('auth state changed', user ? user.email : 'null');
   if(!user){ state.uid=null; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; $('#logoutBtn').hidden=true; return; }
   state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true; $('#logoutBtn').hidden=false;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
