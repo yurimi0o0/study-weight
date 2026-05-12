@@ -201,6 +201,7 @@ onAuthStateChanged(auth, async user=>{
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./service-worker.js').then((reg) => {
     console.log('Service worker registered');
+    reg.update().catch(() => {});
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       if (!newWorker) return;
@@ -216,4 +217,11 @@ if ('serviceWorker' in navigator) {
       });
     });
   }).catch((err) => console.error('Service worker registration failed:', err));
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    const key = 'sw_controller_reloaded_once';
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1');
+      location.reload();
+    }
+  });
 }

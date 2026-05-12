@@ -1,5 +1,5 @@
-const CACHE_NAME = 'study-density-log-v3';
-const APP_SHELL = ['./', './index.html', './style.css?v=20260512a', './app.js?v=20260512a', './manifest.json', './favicon.svg'];
+const CACHE_NAME = 'study-density-log-v4';
+const APP_SHELL = ['./', './index.html', './manifest.json', './favicon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -22,6 +22,11 @@ self.addEventListener('fetch', (event) => {
   const isSameOrigin = url.origin === self.location.origin;
   const isAsset = req.destination === 'script' || req.destination === 'style' || req.destination === 'document';
   if (!isSameOrigin || !isAsset) return;
+
+  if (req.destination === 'script' || req.destination === 'style') {
+    event.respondWith(fetch(req).catch(() => caches.match(req)));
+    return;
+  }
 
   event.respondWith(
     fetch(req)
