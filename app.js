@@ -151,6 +151,7 @@ function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=a
   document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
   $('#backSettings').onclick=()=>renderSettings();
 }
+function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
 function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>${renderCalendarCard()}`;
 $('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes:+$('#goalInput').value,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes:+$('#goalInput').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
@@ -198,37 +199,26 @@ onAuthStateChanged(auth, async user=>{
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker
-    .register('/study-weight/service-worker.js')
-    .then((reg) => {
-      console.log('Service worker registered');
-
-      reg.update().catch(() => {});
-
-      reg.addEventListener('updatefound', () => {
-        const newWorker = reg.installing;
-        if (!newWorker) return;
-
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            const key = 'sw_reloaded_once';
-
-            if (!sessionStorage.getItem(key)) {
-              console.log('New service worker installed. Reloading...');
-              sessionStorage.setItem(key, '1');
-              location.reload();
-            }
+  navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+    console.log('Service worker registered');
+    reg.update().catch(() => {});
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          const key = 'sw_reloaded_once';
+          if (!sessionStorage.getItem(key)) {
+            console.log('New service worker installed. Reloading...');
+            sessionStorage.setItem(key, '1');
+            location.reload();
           }
-        });
+        }
       });
-    })
-    .catch((err) => {
-      console.error('Service worker registration failed:', err);
     });
-
+  }).catch((err) => console.error('Service worker registration failed:', err));
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     const key = 'sw_controller_reloaded_once';
-
     if (!sessionStorage.getItem(key)) {
       sessionStorage.setItem(key, '1');
       location.reload();

@@ -1,9 +1,20 @@
 const CACHE_NAME = 'study-density-log-v4';
-const APP_SHELL = ['./', './index.html', './manifest.json', './favicon.svg'];
+const APP_SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // addAll は1件でも404があると全体失敗するため、個別に安全追加
+      await Promise.all(APP_SHELL.map(async (url) => {
+        try {
+          const req = new Request(url, { cache: 'no-cache' });
+          const res = await fetch(req);
+          if (res.ok) await cache.put(req, res.clone());
+        } catch (_) {
+          // オフラインや404でも install 全体を失敗させない
+        }
+      }));
+    }).then(() => self.skipWaiting())
   );
 });
 
