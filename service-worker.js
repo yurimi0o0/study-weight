@@ -1,5 +1,5 @@
-const CACHE_NAME = 'study-density-log-v2';
-const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './favicon.svg'];
+const CACHE_NAME = 'study-density-log-v3';
+const APP_SHELL = ['./', './index.html', './style.css?v=20260512a', './app.js?v=20260512a', './manifest.json', './favicon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
