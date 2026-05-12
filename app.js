@@ -18,10 +18,12 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0 };
+const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null };
 
 const $ = s => document.querySelector(s);
 const todayStr = () => new Date().toISOString().slice(0,10);
+const logicalNow = () => { const n=new Date(); if(n.getHours()<4) n.setDate(n.getDate()-1); return n; };
+const logicalDateStr = () => logicalNow().toISOString().slice(0,10);
 const nowTime = () => new Date().toTimeString().slice(0,5);
 const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x.toISOString().slice(0,10); };
 const minFromTime = t => t ? (+t.slice(0,2))*60 + (+t.slice(3,5)) : null;
@@ -40,13 +42,13 @@ function userCol(path){ return collection(db, `users/${state.uid}/${path}`); }
 function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
 async function ensureSeedData(){
-  if ((await getDocs(userCol('subjects'))).empty) for (const name of DEFAULT_SUBJECTS) await addDoc(userCol('subjects'), { name, color:'#26c6da', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  if ((await getDocs(userCol('subjects'))).empty) for (const [i, name] of DEFAULT_SUBJECTS.entries()) await addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   if ((await getDocs(userCol('labels'))).empty) for (const name of DEFAULT_LABELS) await addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   const settingsRef = doc(db, `users/${state.uid}/settings/main`); if (!(await getDoc(settingsRef)).exists()) await setDoc(settingsRef, { quality: DEFAULT_QUALITY, appName: APP_NAME });
 }
 async function loadAll(){
-  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()}));
+  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
+  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
   state.labels=(await getDocs(query(userCol('labels')))).docs.map(d=>({id:d.id,...d.data()}));
   state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
@@ -56,15 +58,15 @@ async function loadAll(){
 }
 
 function aggregate(){
-  const t=todayStr(), w=mondayOf(), m=t.slice(0,7); let out={today:0,todayF:0,week:0,weekF:0,month:0,monthF:0,total:0,totalF:0};
+  const t=logicalDateStr(), w=mondayOf(logicalNow()), m=t.slice(0,7); let out={today:0,todayF:0,week:0,weekF:0,month:0,monthF:0,total:0,totalF:0};
   state.records.forEach(r=>{const min=+r.minutes||0,f=focusMinutes(r); out.total+=min; out.totalF+=f; if(r.date===t){out.today+=min;out.todayF+=f;} if(r.date>=w){out.week+=min;out.weekF+=f;} if((r.date||'').startsWith(m)){out.month+=min;out.monthF+=f;}});
   return out;
 }
-const fmtH = m => `${(m/60).toFixed(1)}h`;
+const fmtH = m => `${Math.floor((m||0)/60)}時間${Math.round((m||0)%60)}分`;
 
 function renderDashboard(){
-  const a=aggregate(); const next=state.tests.filter(t=>t.date>=todayStr()).sort((x,y)=>x.date.localeCompare(y.date))[0];
-  const days=next?Math.ceil((new Date(next.date)-new Date(todayStr()))/86400000):null;
+  const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
+  const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
   const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
@@ -72,8 +74,20 @@ function renderDashboard(){
   <div class='card'><h3>目標とテスト</h3><div>今週目標: ${fmtH(state.weekGoal)} / 達成率 ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div><div class='small'>次のテスト: ${next?`${next.name}（あと${days}日）`:'未登録'}</div></div>
   <div class='card'><h3>直近7日 学習推移（実時間）</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
+  ${renderMaterialTotalsCard()}
   ${renderBreakdownCard('ラベル別', state.labels.map(l=>[l.name,state.records.filter(r=>(r.labelIds||[]).includes(l.id)).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderBreakdownCard('質別', ['S','A','B','C','D'].map(q=>[q,state.records.filter(r=>r.quality===q).reduce((x,r)=>x+(+r.minutes||0),0)]))}`;
+}
+function renderMaterialTotalsCard(){
+  const map = new Map();
+  state.records.forEach(r=>{
+    const key = r.materialId || '__none__';
+    const item = map.get(key) || { materialId:key, minutes:0, focus:0, count:0, pages:0, problems:0, subjectId:r.subjectId||'' };
+    item.minutes += +r.minutes||0; item.focus += focusMinutes(r); item.count += 1; item.pages += +r.pages||0; item.problems += +r.problems||0;
+    map.set(key,item);
+  });
+  const rows=[...map.values()].sort((a,b)=>b.minutes-a.minutes);
+  return `<div class='card'><h3>教材別累計</h3>${rows.map(v=>{const m=state.materials.find(x=>x.id===v.materialId); const materialName=m?.name||'教材未選択'; const sid=m?.subjectId||v.subjectId; const sname=subjectName(sid); return `<div class='list-item'><div><b>${materialName}</b> / ${sname}</div><div class='small'>合計 ${fmtH(v.minutes)}・集中 ${fmtH(v.focus)}・${v.count}回</div><div class='small'>ページ ${v.pages} / 問題 ${v.problems}</div></div>`;}).join('')||'<div class=\"small\">データなし</div>'}</div>`;
 }
 function renderBreakdownCard(title,pairs){
   const rows=pairs.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]); const total=rows.reduce((s,[,v])=>s+v,0)||1;
@@ -81,14 +95,16 @@ function renderBreakdownCard(title,pairs){
 }
 
 function renderRecordForm(edit=null){
-  const r=edit||{date:todayStr(),startTime:'',endTime:nowTime(),minutes:'',subjectId:'',materialId:'',labelIds:[],quality:'A',pages:'',problems:'',memo:''};
+  const r=edit||{date:logicalDateStr(),startTime:'',endTime:nowTime(),minutes:'',subjectId:'',materialId:'',labelIds:[],quality:'A',pages:'',problems:'',memo:''};
   const selectedLabels = new Set(r.labelIds || []);
   $('#record').innerHTML=`<div class='card'>
     <h3>${edit?'記録編集':'記録追加'}</h3>
+    <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='row'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
+    <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
     <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
     <label>日付</label><input id='fDate' type='date' value='${r.date}' />
     <div class='row'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
-    <label>分数</label><input id='fMinutes' type='number' min='1' value='${r.minutes||''}' />
+    <label>学習時間（分）</label><input id='fMinutes' type='number' min='1' value='${r.minutes||''}' />
     <div class='row'>${[15,30,45,60,90].map(m=>`<button class='btn qmin' data-min='${m}' type='button'>${m}分</button>`).join('')}</div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
@@ -97,13 +113,21 @@ function renderRecordForm(edit=null){
     <div class='row'><div><label>ページ数</label><input id='fPages' type='number' value='${r.pages||''}' /></div><div><label>問題数</label><input id='fProblems' type='number' value='${r.problems||''}' /></div></div>
     <div class='row'><button id='saveRecord' class='btn primary'>保存</button>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}</div>
   </div>`;
+  let sw=0, timer=null;
   document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{chip.classList.toggle('active');});
+  const drawSw=()=>{$('#swDisplay').textContent=new Date(sw*1000).toISOString().slice(11,19);};
+  $('#swStart').onclick=()=>{if(timer) return; timer=setInterval(()=>{sw++;drawSw();},1000);};
+  $('#swStop').onclick=()=>{clearInterval(timer); timer=null;};
+  $('#swSet').onclick=()=>{$('#fMinutes').value=Math.max(1,Math.round(sw/60)); autoStart();};
   document.querySelectorAll('.qmin').forEach(b=>b.onclick=()=>$('#fMinutes').value=b.dataset.min);
-  const auto=()=>{const m=calcMinutesByTime($('#fStart').value,$('#fEnd').value); if(m) $('#fMinutes').value=m;}; $('#fStart').onchange=auto; $('#fEnd').onchange=auto;
-  $('#saveRecord').onclick=async()=>{const rawDate=$('#fDate').value; const normalizedDate=normalizeDateInput(rawDate); if(!normalizedDate) return alert('無効な日付です。YYYY-MM-DD または YYYY/MM/DD 形式で入力してください。'); const data={date:normalizedDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:+$('#fMinutes').value,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('分数は必須');
+  const autoStart=()=>{const end=$('#fEnd').value, mins=+($('#fMinutes').value||0); if(!end||!mins) return; const e=minFromTime(end); const s=Math.max(0,e-mins); const hh=String(Math.floor(s/60)).padStart(2,'0'); const mm=String(s%60).padStart(2,'0'); $('#fStart').value=`${hh}:${mm}`;};
+  $('#fEnd').onchange=autoStart; $('#fMinutes').onchange=autoStart;
+  const saveHandler=async()=>{const rawDate=$('#fDate').value; const normalizedDate=normalizeDateInput(rawDate); if(!normalizedDate) return alert('無効な日付です。YYYY-MM-DD または YYYY/MM/DD 形式で入力してください。'); const data={date:normalizedDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:+$('#fMinutes').value,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('学習時間は必須');
     if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
     await refresh(); switchScreen('list');
   };
+  $('#saveRecord').onclick=saveHandler;
+  $('#saveRecordTop').onclick=saveHandler;
   if(edit) $('#cancelEdit').onclick=()=>renderRecordForm();
 }
 
@@ -121,16 +145,31 @@ const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
 function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map(i=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div>`).join('')}`; }
-function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><div class='row'><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
+  document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
   $('#backSettings').onclick=()=>renderSettings();
 }
-function renderGoals(){ const a=aggregate(); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date}<button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
+function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
+function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>${renderCalendarCard()}`;
 $('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes:+$('#goalInput').value,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes:+$('#goalInput').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
-document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();}); }
-function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
+document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
+$('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
+$('#calNext').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
+$('#calToday').onclick=()=>{state.calendarMonth=logicalDateStr().slice(0,7); state.selectedDate=null; renderGoals();};
+document.querySelectorAll('.cal-cell[data-date]').forEach(c=>c.onclick=()=>{state.selectedDate=c.dataset.date; renderGoals();});
+}
+function renderCalendarCard(){
+  const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
+  const dayMap={}; state.records.forEach(r=>{if(!r.date?.startsWith(state.calendarMonth)) return; dayMap[r.date]=(dayMap[r.date]||{minutes:0,focus:0,records:[]}); dayMap[r.date].minutes+=(+r.minutes||0); dayMap[r.date].focus+=focusMinutes(r); dayMap[r.date].records.push(r);});
+  const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
+  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
+  return `<div class='card'><h3>カレンダー</h3><div class='row'><button class='btn small' id='calPrev'>前月</button><div class='small'>${state.calendarMonth}</div><button class='btn small' id='calNext'>次月</button><button class='btn small' id='calToday'>今月</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}</div></div>`;
+}
+function renderCalendarDayRecords(dayInfo,date){ if(!dayInfo) return `<div class='small'>日付をタップするとその日の記録を表示します。</div>`; return `<h4>${date} の記録</h4>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`; }
+function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><div class='col'><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
 $('#settingsPanel').innerHTML = `<h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button>`;
 $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
@@ -159,4 +198,22 @@ onAuthStateChanged(auth, async user=>{
   state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
-if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+    console.log('Service worker registered');
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          const key = 'sw_reloaded_once';
+          if (!sessionStorage.getItem(key)) {
+            console.log('New service worker installed. Reloading...');
+            sessionStorage.setItem(key, '1');
+            location.reload();
+          }
+        }
+      });
+    });
+  }).catch((err) => console.error('Service worker registration failed:', err));
+}

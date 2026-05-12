@@ -1,7 +1,35 @@
-const CACHE_NAME = 'study-density-log-v1';
-const ASSETS = ['./','./index.html','./style.css','./app.js','./manifest.json'];
-self.addEventListener('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS))));
-self.addEventListener('activate', e => e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k!==CACHE_NAME).map(k => caches.delete(k))))));
-self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(c => c || fetch(e.request).catch(()=>caches.match('./index.html'))));
+const CACHE_NAME = 'study-density-log-v2';
+const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './favicon.svg'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const req = event.request;
+  const url = new URL(req.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isAsset = req.destination === 'script' || req.destination === 'style' || req.destination === 'document';
+  if (!isSameOrigin || !isAsset) return;
+
+  event.respondWith(
+    fetch(req)
+      .then((res) => {
+        const cloned = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, cloned));
+        return res;
+      })
+      .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+  );
 });

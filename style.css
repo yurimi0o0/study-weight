@@ -19,6 +19,7 @@ h1 { margin: 0 0 8px; font-size: 1.2rem; }
 .metric { background:#0d1628; border:1px solid #253a5a; border-radius:10px; padding:10px; }
 .metric .value { font-size:1.15rem; font-weight:700; }
 .btn { border:1px solid #2f4669; background:#1a2942; color:#fff; border-radius:10px; padding:10px 12px; min-height:42px; }
+.btn.small { min-height:32px; padding:6px 10px; font-size:.82rem; }
 .btn.primary { background: #1b8ea0; border-color:#38cbdc; }
 .btn.danger { background: #5b1e23; border-color:#8b2a31; }
 input,select,textarea { width:100%; max-width:100%; background:#0c1526; color:#fff; border:1px solid #2d415f; border-radius:10px; padding:10px; min-height:42px; }
@@ -39,6 +40,16 @@ label { display:block; font-size:.9rem; color:var(--muted); margin:8px 0 4px; }
 .bar { flex:1; background:#1f6fa4; border-radius:6px 6px 0 0; min-height:4px; position:relative; }
 .legend-row { display:flex; justify-content:space-between; font-size:.82rem; margin:4px 0; }
 .small { color:var(--muted); font-size:.82rem; }
+.col { display:flex; flex-direction:column; gap:8px; }
+.cal-week,.cal-grid { display:grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap:4px; }
+.cal-week div { text-align:center; font-size:.75rem; color:var(--muted); }
+.cal-cell { min-height:44px; border:1px solid #2d415f; border-radius:8px; background:#0c1526; color:#dce9ff; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.cal-cell.today { outline:2px solid #38cbdc; }
+.cal-cell.studied-1 { background:#102235; }
+.cal-cell.studied-2 { background:#15314d; }
+.cal-cell.studied-3 { background:#1a4c72; }
+.cal-cell.studied-4 { background:#1f6fa4; }
+.cal-cell small { font-size:.7rem; line-height:1; }
 @media (max-width: 560px) {
   .row { flex-direction: column; }
 }
