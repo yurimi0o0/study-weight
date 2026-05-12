@@ -199,26 +199,37 @@ onAuthStateChanged(auth, async user=>{
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js').then((reg) => {
-    console.log('Service worker registered');
-    reg.update().catch(() => {});
-    reg.addEventListener('updatefound', () => {
-      const newWorker = reg.installing;
-      if (!newWorker) return;
-      newWorker.addEventListener('statechange', () => {
-        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-          const key = 'sw_reloaded_once';
-          if (!sessionStorage.getItem(key)) {
-            console.log('New service worker installed. Reloading...');
-            sessionStorage.setItem(key, '1');
-            location.reload();
+  navigator.serviceWorker
+    .register('/study-weight/service-worker.js')
+    .then((reg) => {
+      console.log('Service worker registered');
+
+      reg.update().catch(() => {});
+
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            const key = 'sw_reloaded_once';
+
+            if (!sessionStorage.getItem(key)) {
+              console.log('New service worker installed. Reloading...');
+              sessionStorage.setItem(key, '1');
+              location.reload();
+            }
           }
-        }
+        });
       });
+    })
+    .catch((err) => {
+      console.error('Service worker registration failed:', err);
     });
-  }).catch((err) => console.error('Service worker registration failed:', err));
+
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     const key = 'sw_controller_reloaded_once';
+
     if (!sessionStorage.getItem(key)) {
       sessionStorage.setItem(key, '1');
       location.reload();
