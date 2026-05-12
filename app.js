@@ -40,13 +40,13 @@ function userCol(path){ return collection(db, `users/${state.uid}/${path}`); }
 function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
 async function ensureSeedData(){
-  if ((await getDocs(userCol('subjects'))).empty) for (const name of DEFAULT_SUBJECTS) await addDoc(userCol('subjects'), { name, color:'#26c6da', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  if ((await getDocs(userCol('subjects'))).empty) for (const [i, name] of DEFAULT_SUBJECTS.entries()) await addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   if ((await getDocs(userCol('labels'))).empty) for (const name of DEFAULT_LABELS) await addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   const settingsRef = doc(db, `users/${state.uid}/settings/main`); if (!(await getDoc(settingsRef)).exists()) await setDoc(settingsRef, { quality: DEFAULT_QUALITY, appName: APP_NAME });
 }
 async function loadAll(){
-  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()}));
+  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
+  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
   state.labels=(await getDocs(query(userCol('labels')))).docs.map(d=>({id:d.id,...d.data()}));
   state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
@@ -88,7 +88,7 @@ function renderRecordForm(edit=null){
     <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
     <label>日付</label><input id='fDate' type='date' value='${r.date}' />
     <div class='row'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
-    <label>分数</label><input id='fMinutes' type='number' min='1' value='${r.minutes||''}' />
+    <label>学習時間（分）</label><input id='fMinutes' type='number' min='1' value='${r.minutes||''}' />
     <div class='row'>${[15,30,45,60,90].map(m=>`<button class='btn qmin' data-min='${m}' type='button'>${m}分</button>`).join('')}</div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
@@ -99,7 +99,8 @@ function renderRecordForm(edit=null){
   </div>`;
   document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{chip.classList.toggle('active');});
   document.querySelectorAll('.qmin').forEach(b=>b.onclick=()=>$('#fMinutes').value=b.dataset.min);
-  const auto=()=>{const m=calcMinutesByTime($('#fStart').value,$('#fEnd').value); if(m) $('#fMinutes').value=m;}; $('#fStart').onchange=auto; $('#fEnd').onchange=auto;
+  const autoStart=()=>{const end=$('#fEnd').value, mins=+($('#fMinutes').value||0); if(!end||!mins) return; const e=minFromTime(end); const s=Math.max(0,e-mins); const hh=String(Math.floor(s/60)).padStart(2,'0'); const mm=String(s%60).padStart(2,'0'); $('#fStart').value=`${hh}:${mm}`;};
+  $('#fEnd').onchange=autoStart; $('#fMinutes').onchange=autoStart;
   $('#saveRecord').onclick=async()=>{const rawDate=$('#fDate').value; const normalizedDate=normalizeDateInput(rawDate); if(!normalizedDate) return alert('無効な日付です。YYYY-MM-DD または YYYY/MM/DD 形式で入力してください。'); const data={date:normalizedDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:+$('#fMinutes').value,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('分数は必須');
     if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
     await refresh(); switchScreen('list');
@@ -121,9 +122,10 @@ const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
 function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map(i=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div>`).join('')}`; }
-function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><div class='row'><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
+  document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
   $('#backSettings').onclick=()=>renderSettings();
 }
 function renderGoals(){ const a=aggregate(); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date}<button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
