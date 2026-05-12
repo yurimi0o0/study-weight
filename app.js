@@ -60,8 +60,8 @@ function renderDashboard(){
   const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
-  $('#dashboard').innerHTML=`<div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div>
-  <div class='card'><div>今週目標: ${fmtH(state.weekGoal)} / 達成率 ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div><div class='small'>次のテスト: ${next?`${next.name}（あと${days}日）`:'未登録'}</div></div>
+  $('#dashboard').innerHTML=`<div class='card'><h3>学習推移</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div>
+  <div class='card'><h3>目標とテスト</h3><div>今週目標: ${fmtH(state.weekGoal)} / 達成率 ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div><div class='small'>次のテスト: ${next?`${next.name}（あと${days}日）`:'未登録'}</div></div>
   <div class='card'><h3>直近7日 学習推移（実時間）</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderBreakdownCard('ラベル別', state.labels.map(l=>[l.name,state.records.filter(r=>(r.labelIds||[]).includes(l.id)).reduce((x,r)=>x+(+r.minutes||0),0)]))}
@@ -74,23 +74,25 @@ function renderBreakdownCard(title,pairs){
 
 function renderRecordForm(edit=null){
   const r=edit||{date:todayStr(),startTime:'',endTime:nowTime(),minutes:'',subjectId:'',materialId:'',labelIds:[],quality:'A',pages:'',problems:'',memo:''};
+  const selectedLabels = new Set(r.labelIds || []);
   $('#record').innerHTML=`<div class='card'>
     <h3>${edit?'記録編集':'記録追加'}</h3>
+    <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
     <label>日付</label><input id='fDate' type='date' value='${r.date}' />
     <div class='row'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
     <label>分数</label><input id='fMinutes' type='number' min='1' value='${r.minutes||''}' />
     <div class='row'>${[15,30,45,60,90].map(m=>`<button class='btn qmin' data-min='${m}' type='button'>${m}分</button>`).join('')}</div>
+    <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
     <label>教材</label><select id='fMaterial'><option value=''>未選択</option>${state.materials.map(m=>`<option value='${m.id}' ${m.id===r.materialId?'selected':''}>${m.name}</option>`).join('')}</select>
-    <label>ラベル(複数)</label><select id='fLabels' multiple size='5'>${state.labels.map(l=>`<option value='${l.id}' ${(r.labelIds||[]).includes(l.id)?'selected':''}>${l.name}</option>`).join('')}</select>
-    <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
+    <label>ラベル(複数)</label><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' data-id='${l.id}'>${l.name}</button>`).join('')}</div>
     <div class='row'><div><label>ページ数</label><input id='fPages' type='number' value='${r.pages||''}' /></div><div><label>問題数</label><input id='fProblems' type='number' value='${r.problems||''}' /></div></div>
-    <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
     <div class='row'><button id='saveRecord' class='btn primary'>保存</button>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}</div>
   </div>`;
+  document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{chip.classList.toggle('active');});
   document.querySelectorAll('.qmin').forEach(b=>b.onclick=()=>$('#fMinutes').value=b.dataset.min);
   const auto=()=>{const m=calcMinutesByTime($('#fStart').value,$('#fEnd').value); if(m) $('#fMinutes').value=m;}; $('#fStart').onchange=auto; $('#fEnd').onchange=auto;
-  $('#saveRecord').onclick=async()=>{const data={date:$('#fDate').value,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:+$('#fMinutes').value,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...$('#fLabels').selectedOptions].map(o=>o.value),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('分数は必須');
+  $('#saveRecord').onclick=async()=>{const rawDate=$('#fDate').value; if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(rawDate)) return alert('日付はYYYY-MM-DD形式で入力してください。'); const data={date:rawDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:+$('#fMinutes').value,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('分数は必須');
     if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
     await refresh(); switchScreen('list');
   };
@@ -101,7 +103,7 @@ function renderList(){
   $('#list').innerHTML=`<div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${l.name}</option>`)}</select></div></div><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
     const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l)));
-    $('#recordsWrap').innerHTML=rows.map(r=>`<div class='list-item'><b>${r.date}</b> ${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'}<br>${r.minutes}分（集中${focusMinutes(r)}分）質:${r.quality}<div class='tags'>${(r.labelIds||[]).map(id=>`<span class='tag'>${labelName(id)}</span>`).join('')}</div><div class='small'>${r.memo||''}</div><div class='row'><button class='btn edit' data-id='${r.id}'>編集</button><button class='btn danger del' data-id='${r.id}'>削除</button></div></div>`).join('')||'<div class="card">データなし</div>';
+    $('#recordsWrap').innerHTML=rows.map(r=>`<div class='list-item timeline-card'><b>${r.date}</b> ${r.startTime||'--:--'}-${r.endTime||'--:--'}<br>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'}<br>${r.minutes}分（集中${focusMinutes(r)}分）質:${r.quality}<div class='tags'>${(r.labelIds||[]).map(id=>`<span class='tag'>${labelName(id)}</span>`).join('')}</div><div class='small'>${r.memo||''}</div><div class='row'><button class='btn edit' data-id='${r.id}'>編集</button><button class='btn danger del' data-id='${r.id}'>削除</button></div></div>`).join('')||'<div class="card">データなし</div>';
     document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
     document.querySelectorAll('.del').forEach(b=>b.onclick=async()=>{if(confirm('削除しますか？')){await deleteDoc(userDoc('studyRecords',b.dataset.id)); await refresh();}});
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
@@ -110,42 +112,43 @@ const subjectName=id=>state.subjects.find(x=>x.id===id)?.name||'未設定';
 const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
-function renderManage(){ $('#manage').innerHTML=`<div class='card'>${managerBlock('教科','subjects',state.subjects,true)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,true)}</div>`; bindManager(); }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/>${hasColor?"<input id='new-"+key+"-color' placeholder='#26c6da'/>":''}<button class='btn add' data-key='${key}'>追加</button></div>${items.map(i=>`<div class='list-item'>${i.name}<button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div>`).join('')}`; }
-function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color=$(`#new-${key}-color`)?.value||'#26c6da'; await addDoc(userCol(key),base); await refresh();});
+function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map(i=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div>`).join('')}`; }
+function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
+  $('#backSettings').onclick=()=>renderSettings();
 }
-function renderGoals(){ $('#goals').innerHTML=`<div class='card'><h3>今週の目標</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date}<button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
+function renderGoals(){ const a=aggregate(); $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><input id='goalInput' type='number' value='${state.weekGoal||0}'/><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date}<button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>`;
 $('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes:+$('#goalInput').value,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes:+$('#goalInput').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();}); }
-function renderSettings(){ $('#settings').innerHTML=`<div class='card'><h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button></div><div class='card'><h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
+function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
+$('#settingsPanel').innerHTML = `<h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button>`;
+$('#openManage').onclick=()=>renderSettings('manage');
+$('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
+$('#openQuality').onclick=()=>renderSettings();
+$('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
-$('#exp').onclick=()=>{const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();};
-$('#imp').onclick=async()=>{const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();};
-$('#wipe').onclick=async()=>{if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}; }
+document.addEventListener('click', async(e)=>{ if(e.target?.id==='exp'){const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();} if(e.target?.id==='imp'){const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();} if(e.target?.id==='wipe'){if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}} , {once:true}); }
 
-function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='manage') renderManage(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){ await loadAll(); ['dashboard','record','list','manage','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); }
+function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
+async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); }
 
 $('#appTitle').textContent = APP_NAME;
-$('#loginBtn').onclick = async () => {
+$('#loginBtn').onclick=async()=>{
   try {
-    console.log('start Google login');
-    const result = await signInWithPopup(auth, new GoogleAuthProvider());
-    console.log('login success', result.user?.email);
+    const result = await signInWithPopup(auth,new GoogleAuthProvider());
+    console.log('Login success:', result.user?.email);
   } catch (error) {
-    console.error('login failed', error);
-    alert(`ログイン失敗: ${error.code}\n${error.message}`);
+    console.error('Login failed:', error.code, error.message);
+    alert(`ログイン失敗: ${error.code} / ${error.message}`);
   }
 };
-$('#logoutBtn').onclick=()=>signOut(auth);
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
-
 onAuthStateChanged(auth, async user=>{
-  console.log('auth state changed', user ? user.email : 'null');
-  if(!user){ state.uid=null; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; $('#logoutBtn').hidden=true; return; }
-  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true; $('#logoutBtn').hidden=false;
+  console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
+  if(!user){ state.uid=null; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
+  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
