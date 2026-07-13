@@ -75,20 +75,28 @@ function aggregate(){
 }
 const fmtH = m => `${Math.floor((m||0)/60)}時間${Math.round((m||0)%60)}分`;
 
-function renderDashboard(){
+async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
   const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
   const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
+  if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
+  const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
   $('#dashboard').innerHTML=`${renderScheduleStreakCard()}
-  <div class='card'><h3>学習推移</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div>
-  <div class='card'><h3>目標とテスト</h3><div>今週目標: ${fmtH(state.weekGoal)} / 達成率 ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div><div class='small'>次のテスト: ${next?`${next.name}（あと${days}日）`:'未登録'}</div></div>
-  <div class='card'><h3>直近7日 学習推移（実時間）</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
+  ${carryoverHtml()}
+  ${todayTasksHtml()}
+  <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
+  ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
+  ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${next.name}（あと${days}日）</div>`:''}</div>
+  <div class='card'><h3>直近7日</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
+  <details class='fold'><summary>詳しい内訳（教科・教材・ラベル・質）</summary>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderMaterialTotalsCard()}
   ${renderBreakdownCard('ラベル別', state.labels.map(l=>[l.name,state.records.filter(r=>(r.labelIds||[]).includes(l.id)).reduce((x,r)=>x+(+r.minutes||0),0)]))}
-  ${renderBreakdownCard('質別', ['S','A','B','C','D'].map(q=>[q,state.records.filter(r=>r.quality===q).reduce((x,r)=>x+(+r.minutes||0),0)]))}`;
+  ${renderBreakdownCard('質別', ['S','A','B','C','D'].map(q=>[q,state.records.filter(r=>r.quality===q).reduce((x,r)=>x+(+r.minutes||0),0)]))}
+  </details>`;
+  bindScheduleChecks();
 }
 function renderMaterialTotalsCard(){
   const map = new Map();
@@ -153,10 +161,15 @@ function renderRecordForm(edit=null){
 }
 
 function renderList(){
-  $('#list').innerHTML=`<div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${l.name}</option>`)}</select></div></div><div id='recordsWrap'></div>`;
+  $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${l.name}</option>`)}</select></div></div></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
     const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
-    $('#recordsWrap').innerHTML=rows.map(r=>`<div class='list-item timeline-card'><b>${r.date}</b> ${r.startTime||'--:--'}-${r.endTime||'--:--'}<br>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'}<br>${r.minutes}分（集中${focusMinutes(r)}分）質:${r.quality}<div class='tags'>${(r.labelIds||[]).map(id=>`<span class='tag'>${labelName(id)}</span>`).join('')}</div><div class='small'>${r.memo||''}</div><div class='row'><button class='btn edit' data-id='${r.id}'>編集</button><button class='btn danger del' data-id='${r.id}'>削除</button></div></div>`).join('')||'<div class="card">データなし</div>';
+    $('#recordsWrap').innerHTML=rows.map(r=>`<div class='tl-item'>
+      <div class='tl-head'><span class='tl-title'>${subjectName(r.subjectId)}${materialName(r.materialId)?` <span class='tl-material'>${materialName(r.materialId)}</span>`:''}</span><span class='tl-time'>${r.date.slice(5).replace('-','/')} ${r.startTime||''}${r.startTime||r.endTime?'–':''}${r.endTime||''}</span></div>
+      <div class='tl-meta'>${fmtH(r.minutes)}・集中${fmtH(focusMinutes(r))}・質${r.quality}${(r.labelIds||[]).map(id=>` <span class='tag'>${labelName(id)}</span>`).join('')}</div>
+      ${r.memo?`<div class='tl-memo'>${r.memo}</div>`:''}
+      <div class='tl-actions'><button class='link-btn edit' data-id='${r.id}'>編集</button><button class='link-btn danger del' data-id='${r.id}'>削除</button></div>
+    </div>`).join('')||'<div class="card small">まだ記録がありません</div>';
     document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
     document.querySelectorAll('.del').forEach(b=>b.onclick=async()=>{if(confirm('削除しますか？')){await deleteDoc(userDoc('studyRecords',b.dataset.id)); await refresh();}});
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
@@ -188,7 +201,19 @@ function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=a
   });
   $('#backSettings').onclick=()=>renderSettings();
 }
-function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const gHour=Math.floor((state.weekGoal||0)/60), gMin=(state.weekGoal||0)%60; $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><div class='row'><div><label>時間</label><input id='goalHour' type='number' min='0' value='${gHour}'/></div><div><label>分</label><input id='goalMin' type='number' min='0' max='59' value='${gMin}'/></div></div><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>${renderCalendarCard()}`;
+function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const gHour=Math.floor((state.weekGoal||0)/60), gMin=(state.weekGoal||0)%60; const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
+$('#goals').innerHTML=`
+<div class='card'><h3>今週の進み具合</h3>
+  ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>${fmtH(a.week)} / 目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:`<div class='small'>週目標が未設定です。下の「設定」から登録できます。</div>`}
+</div>
+${renderCalendarCard()}
+${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${t.name}</span><span><b>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
+<details class='fold'><summary>設定（週目標・テスト・タスク・期間）</summary>
+  <div class='card'><h4>今週の目標時間</h4><div class='row'><div><label>時間</label><input id='goalHour' type='number' min='0' value='${gHour}'/></div><div><label>分</label><input id='goalMin' type='number' min='0' max='59' value='${gMin}'/></div></div><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
+  <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${t.name} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
+  ${scheduleSettingsHtml()}
+</details>`;
+bindScheduleSettings();
 $('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=Math.max(0,(+$('#goalHour').value||0)*60+(+$('#goalMin').value||0)); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
@@ -214,7 +239,16 @@ function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date
 function effectiveTasksFor(date){ const p=findActivePeriod(date); return p ? (p.tasks||[]) : (state.schedule.defaultTasks||[]); }
 function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id])); }
 async function ensureScheduleDay(date){
-  const existing=getScheduleDay(date); if(existing) return existing;
+  const existing=getScheduleDay(date);
+  if(existing){
+    // 空のままスナップショットされた日（期間作成直後など）は、タスクが後から登録されたら反映する
+    const eff=effectiveTasksFor(date);
+    if((existing.tasks||[]).length===0 && eff.length>0){
+      existing.tasks=eff.map(t=>({...t}));
+      await setDoc(scheduleDayDoc(date), {...existing, updatedAt:new Date().toISOString()}, {merge:true});
+    }
+    return existing;
+  }
   if(!state.schedule.startDate || date<state.schedule.startDate) return null;
   const data={ date, tasks: effectiveTasksFor(date), done:{}, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
   await setDoc(scheduleDayDoc(date), data);
@@ -247,63 +281,69 @@ function computeScheduleStreak(){
   });
   return { current:running, broken:(running===0 && lastBreakLen>0)?{length:lastBreakLen,date:brokenOn}:null };
 }
-function scheduleTodayHtml(){
+function carryoverHtml(){
+  const carry=scheduleCarryover();
+  if(!carry.length) return '';
+  return `<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${t.text}</span></label>`).join('')}</div>`;
+}
+function todayTasksHtml(){
+  if(!state.schedule?.startDate) return '';
   const today=logicalDateStr();
   const d=getScheduleDay(today);
   const tasks=d?d.tasks:effectiveTasksFor(today);
   const done=d?(d.done||{}):{};
-  const carry=scheduleCarryover();
-  const streak=computeScheduleStreak();
+  const doneCount=tasks.filter(t=>done[t.id]).length;
   const activePeriod=findActivePeriod(today);
-  return `
-  <div class='card'>
-    <h3>ストリーク</h3>
-    <div class='streak-big ${streak.current>0?'':'streak-zero'}'>${streak.current}<span class='unit'>日連続</span></div>
-    ${streak.broken?`<div class='streak-broken'>${streak.broken.date} に ${streak.broken.length}日 のストリークが途切れました</div>`:''}
-  </div>
-  ${carry.length?`<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${t.text}</span></label>`).join('')}</div>`:''}
-  <div class='card'>
-    <h3>今日のタスク（${today}）${activePeriod?`<span class='small'> / ${activePeriod.name}期間中</span>`:''}</h3>
-    ${tasks.length===0?'<div class="small">デフォルトタスク未登録</div>':tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${t.text}</span></label>`).join('')}
+  const emptyMsg=activePeriod
+    ?`「${activePeriod.name}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
+    :'タスクが未登録です。目標タブ下部の設定から追加してください。';
+  return `<div class='card'>
+    <h3>今日のタスク <span class='small'>${activePeriod?`${activePeriod.name}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
+    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${t.text}</span></label>`).join('')}
   </div>`;
+}
+function bindScheduleChecks(){
+  document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
+    await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
+    await refresh();
+  });
 }
 function periodManagerHtml(p){
   return `<div class='card'>
-    <div class='row'><b>${p.name}</b><button class='btn danger small delPeriod' data-id='${p.id}'>期間を削除</button></div>
+    <div class='row'><b>${p.name}</b><button class='link-btn danger delPeriod' data-id='${p.id}'>期間を削除</button></div>
     <div class='small'>${p.startDate} 〜 ${p.endDate}</div>
     <div class='row'><input id='pNewTask-${p.id}' placeholder='タスク名'/><button class='btn small addPeriodTask' data-id='${p.id}'>追加</button></div>
-    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${t.text}</span><button class='btn danger small delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${t.text}</span><button class='link-btn danger delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
   </div>`;
 }
-async function renderSchedule(){
-  const box=$('#schedule'); box.innerHTML=`<div class='card small'>読み込み中...</div>`;
-  const today=logicalDateStr();
-  if(state.schedule.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today);
+function scheduleSettingsHtml(){
   const {startDate=''}=state.schedule||{};
   const defaultTasks=state.schedule?.defaultTasks||[];
   const periods=state.schedulePeriods||[];
-  box.innerHTML=`
+  return `
     <div class='card'>
-      <h3>スケジュール設定</h3>
-      <label>トラッキング開始日</label><input id='schStart' type='date' value='${startDate}'/>
-      <button id='schSaveStart' class='btn primary small'>開始日を保存</button>
+      <h4>タスクのトラッキング開始日</h4>
+      <input id='schStart' type='date' value='${startDate}'/>
+      <button id='schSaveStart' class='btn primary small' style='margin-top:8px'>開始日を保存</button>
+      ${startDate?'':'<div class="small" style="margin-top:6px">開始日を設定するとホームに今日のタスクが表示されます。</div>'}
     </div>
     <div class='card'>
-      <h3>通年のデフォルトタスク</h3>
+      <h4>毎日のデフォルトタスク</h4>
       <div class='row'><input id='schNewTask' placeholder='タスク名（例: 単語100個）'/><button id='schAddTask' class='btn small'>追加</button></div>
       ${defaultTasks.length===0?`<button id='schUseTemplate' class='btn small'>例テンプレートを使う</button>`:''}
-      ${defaultTasks.map(t=>`<div class='list-item'><span>${t.text}</span><button class='btn danger small delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+      ${defaultTasks.map(t=>`<div class='list-item'><span>${t.text}</span><button class='link-btn danger delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
     </div>
     <div class='card'>
-      <h3>期間（季節ごとの上書き）</h3>
-      <div class='small'>期間中はデフォルトタスクの代わりに、その期間専用のタスクが使われます（例: 夏休み・冬休みなど）。</div>
+      <h4>期間（季節ごとの上書き）</h4>
+      <div class='small'>期間中はデフォルトタスクの代わりに、その期間専用のタスクが使われます（例: 夏休み・冬休み）。</div>
       <label>期間名</label><input id='pName' placeholder='例: 夏休み'/>
       <div class='row'><div><label>開始日</label><input id='pStart' type='date'/></div><div><label>終了日</label><input id='pEnd' type='date'/></div></div>
-      <button id='addPeriod' class='btn small'>期間を追加</button>
+      <button id='addPeriod' class='btn small' style='margin-top:8px'>期間を追加</button>
     </div>
-    ${periods.map(periodManagerHtml).join('')}
-    ${startDate?scheduleTodayHtml():'<div class="card small">トラッキング開始日を設定するとタスクチェックが使えます。</div>'}
-  `;
+    ${periods.map(periodManagerHtml).join('')}`;
+}
+function bindScheduleSettings(){
+  const periods=state.schedulePeriods||[];
   $('#schSaveStart').onclick=async()=>{
     const s=$('#schStart').value; if(!s) return alert('開始日を選択してください。');
     await setDoc(doc(db,`users/${state.uid}/settings/schedule`), {...state.schedule,startDate:s,updatedAt:new Date().toISOString()}, {merge:true});
@@ -343,10 +383,6 @@ async function renderSchedule(){
   document.querySelectorAll('.delPeriodTask').forEach(b=>b.onclick=async()=>{
     const p=periods.find(x=>x.id===b.dataset.pid); const newTasks=(p.tasks||[]).filter(t=>t.id!==b.dataset.id);
     await updateDoc(userDoc('schedulePeriods',b.dataset.pid), {tasks:newTasks,updatedAt:new Date().toISOString()});
-    await refresh();
-  });
-  document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
-    await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
     await refresh();
   });
 }
@@ -394,8 +430,8 @@ $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
 document.addEventListener('click', async(e)=>{ if(e.target?.id==='exp'){const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();} if(e.target?.id==='imp'){const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();} if(e.target?.id==='wipe'){if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}} , {once:true}); }
 
-function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='schedule') renderSchedule(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){ await loadAll(); ['dashboard','record','list','goals','schedule','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
+function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
+async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
 
 $('#appTitle').textContent = APP_NAME;
 $('#loginBtn').onclick=async()=>{
