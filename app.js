@@ -74,6 +74,7 @@ function aggregate(){
   return out;
 }
 const fmtH = m => `${Math.floor((m||0)/60)}時間${Math.round((m||0)%60)}分`;
+const fmtHHMM = m => { const t=Math.min(1439,Math.max(0,Math.round(m||0))); return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
@@ -117,15 +118,14 @@ function renderBreakdownCard(title,pairs){
 function renderRecordForm(edit=null){
   const r=edit||{date:logicalDateStr(),startTime:'',endTime:nowTime(),minutes:'',subjectId:'',materialId:'',labelIds:[],quality:'A',pages:'',problems:'',memo:''};
   const selectedLabels = new Set(r.labelIds || []);
-  const rHour = Math.floor((+r.minutes||0)/60), rMin = (+r.minutes||0)%60;
   $('#record').innerHTML=`<div class='card'>
     <h3>${edit?'記録編集':'記録追加'}</h3>
-    <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='row'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
+    <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='sw-actions'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
     <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
     <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
     <label>日付</label><input id='fDate' type='date' value='${r.date}' />
     <div class='row'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
-    <label>学習時間</label><div class='row'><div><label>時間</label><input id='fHour' type='number' min='0' value='${rHour}' /></div><div><label>分</label><input id='fMin' type='number' min='0' max='59' value='${rMin}' /></div></div>
+    <label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' />
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
     <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
@@ -147,10 +147,11 @@ function renderRecordForm(edit=null){
   const drawSw=()=>{$('#swDisplay').textContent=new Date(sw*1000).toISOString().slice(11,19);};
   $('#swStart').onclick=()=>{if(timer) return; timer=setInterval(()=>{sw++;drawSw();},1000);};
   $('#swStop').onclick=()=>{clearInterval(timer); timer=null;};
-  $('#swSet').onclick=()=>{const total=Math.max(1,Math.round(sw/60)); $('#fHour').value=Math.floor(total/60); $('#fMin').value=total%60; autoStart();};
-  const getMinutes=()=>Math.max(0,(+($('#fHour').value||0))*60 + (+($('#fMin').value||0)));
+  $('#swReset').onclick=()=>{clearInterval(timer); timer=null; sw=0; drawSw();};
+  $('#swSet').onclick=()=>{const total=Math.max(1,Math.round(sw/60)); $('#fDuration').value=fmtHHMM(total); autoStart();};
+  const getMinutes=()=>minFromTime($('#fDuration').value)||0;
   const autoStart=()=>{const end=$('#fEnd').value, mins=getMinutes(); if(!end||!mins) return; const e=minFromTime(end); const s=Math.max(0,e-mins); const hh=String(Math.floor(s/60)).padStart(2,'0'); const mm=String(s%60).padStart(2,'0'); $('#fStart').value=`${hh}:${mm}`;};
-  $('#fEnd').onchange=autoStart; $('#fHour').onchange=autoStart; $('#fMin').onchange=autoStart;
+  $('#fEnd').onchange=autoStart; $('#fDuration').onchange=autoStart;
   const saveHandler=async()=>{const rawDate=$('#fDate').value; const normalizedDate=normalizeDateInput(rawDate); if(!normalizedDate) return alert('無効な日付です。YYYY-MM-DD または YYYY/MM/DD 形式で入力してください。'); const totalMinutes=getMinutes(); const data={date:normalizedDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:totalMinutes,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('学習時間は必須');
     if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
     await refresh(); switchScreen('list');
@@ -201,7 +202,7 @@ function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=a
   });
   $('#backSettings').onclick=()=>renderSettings();
 }
-function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const gHour=Math.floor((state.weekGoal||0)/60), gMin=(state.weekGoal||0)%60; const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
+function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
 $('#goals').innerHTML=`
 <div class='card'><h3>今週の進み具合</h3>
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>${fmtH(a.week)} / 目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:`<div class='small'>週目標が未設定です。下の「設定」から登録できます。</div>`}
@@ -209,12 +210,12 @@ $('#goals').innerHTML=`
 ${renderCalendarCard()}
 ${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${t.name}</span><span><b>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
 <details class='fold'><summary>設定（週目標・テスト・タスク・期間）</summary>
-  <div class='card'><h4>今週の目標時間</h4><div class='row'><div><label>時間</label><input id='goalHour' type='number' min='0' value='${gHour}'/></div><div><label>分</label><input id='goalMin' type='number' min='0' max='59' value='${gMin}'/></div></div><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
+  <div class='card'><h4>今週の目標時間</h4><input id='goalDuration' type='time' value='${fmtHHMM(state.weekGoal||0)}'/><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
   <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${t.name} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
-$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=Math.max(0,(+$('#goalHour').value||0)*60+(+$('#goalMin').value||0)); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
+$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
 $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
@@ -226,10 +227,18 @@ function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
   const dayMap={}; state.records.forEach(r=>{if(!r.date?.startsWith(state.calendarMonth)) return; dayMap[r.date]=(dayMap[r.date]||{minutes:0,focus:0,records:[]}); dayMap[r.date].minutes+=(+r.minutes||0); dayMap[r.date].focus+=focusMinutes(r); dayMap[r.date].records.push(r);});
   const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
-  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
-  return `<div class='card'><h3>カレンダー</h3><div class='row'><button class='btn small' id='calPrev'>前月</button><div class='small'>${state.calendarMonth}</div><button class='btn small' id='calNext'>次月</button><button class='btn small' id='calToday'>今月</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}</div></div>`;
+  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
+  return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
 }
-function renderCalendarDayRecords(dayInfo,date){ if(!dayInfo) return `<div class='small'>日付をタップするとその日の記録を表示します。</div>`; return `<h4>${date} の記録</h4>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`; }
+function renderCalendarDayRecords(dayInfo,date){ if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`; if(!dayInfo) return ''; return `<h4>${date} の記録</h4>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`; }
+function renderCalendarDayTasks(date){
+  if(!date || !state.schedule?.startDate || date<state.schedule.startDate) return '';
+  const d=getScheduleDay(date);
+  const tasks=d?d.tasks:effectiveTasksFor(date);
+  if(!tasks.length) return '';
+  const done=d?(d.done||{}):{};
+  return `<h4 style='margin-top:12px'>${date} のタスク</h4>${tasks.map(t=>`<div class='legend-row'><span>${done[t.id]?'✓':'・'} ${t.text}</span></div>`).join('')}`;
+}
 
 // ---- スケジュール（通年ベース + 季節ごとの期間上書き） ----
 function scheduleDayDoc(date){ return doc(db, `users/${state.uid}/scheduleDays/${date}`); }
@@ -415,7 +424,12 @@ async function maybeNotifyToday(){
     localStorage.setItem(key, today);
   }catch(_){ /* 通知非対応環境では無視 */ }
 }
-function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><div class='col'><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='openNotify' class='btn'>通知設定</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
+function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card menu-card'><h3>設定メニュー</h3>
+  <button class='menu-row' id='openManage'><span>教科・教材・ラベル管理</span><span class='chev'>›</span></button>
+  <button class='menu-row' id='openBackup'><span>バックアップ</span><span class='chev'>›</span></button>
+  <button class='menu-row' id='openQuality'><span>質係数</span><span class='chev'>›</span></button>
+  <button class='menu-row' id='openNotify'><span>通知設定</span><span class='chev'>›</span></button>
+  </div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div><button id='settingsLogout' class='btn danger' style='width:100%'>ログアウト</button>`;
 $('#settingsPanel').innerHTML = `<h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button>`;
 $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
