@@ -123,9 +123,8 @@ function renderRecordForm(edit=null){
     <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='sw-actions'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
     <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
     <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
-    <label>日付</label><input id='fDate' type='date' value='${r.date}' />
-    <div class='row'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
-    <label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' />
+    <div class='row-2'><div><label>日付</label><input id='fDate' type='date' value='${r.date}' /></div><div><label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' /></div></div>
+    <div class='row-2'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
     <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
@@ -227,10 +226,14 @@ function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
   const dayMap={}; state.records.forEach(r=>{if(!r.date?.startsWith(state.calendarMonth)) return; dayMap[r.date]=(dayMap[r.date]||{minutes:0,focus:0,records:[]}); dayMap[r.date].minutes+=(+r.minutes||0); dayMap[r.date].focus+=focusMinutes(r); dayMap[r.date].records.push(r);});
   const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
-  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
+  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
   return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
 }
-function renderCalendarDayRecords(dayInfo,date){ if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`; if(!dayInfo) return ''; return `<h4>${date} の記録</h4>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`; }
+function renderCalendarDayRecords(dayInfo,date){
+  if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`;
+  if(!dayInfo) return `<h4>${date}</h4><div class='small'>この日の学習記録はありません。</div>`;
+  return `<h4>${date}</h4><div class='small' style='margin-bottom:6px'>合計 ${fmtH(dayInfo.minutes)}・集中 ${fmtH(dayInfo.focus)}</div>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`;
+}
 function renderCalendarDayTasks(date){
   if(!date || !state.schedule?.startDate || date<state.schedule.startDate) return '';
   const d=getScheduleDay(date);
@@ -266,8 +269,8 @@ async function ensureScheduleDay(date){
 async function toggleScheduleTask(date,taskId){
   const d=await ensureScheduleDay(date); if(!d) return;
   const done={...(d.done||{}), [taskId]: !d.done?.[taskId]};
+  d.done=done; // ローカル状態を即時反映してからバックエンドに書き込む
   await setDoc(scheduleDayDoc(date), {...d,done,updatedAt:new Date().toISOString()}, {merge:true});
-  d.done=done;
 }
 function scheduleCarryover(){
   const today=logicalDateStr(); const yesterday=addDays(today,-1);
@@ -313,8 +316,13 @@ function todayTasksHtml(){
 }
 function bindScheduleChecks(){
   document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
-    await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
-    await refresh();
+    try{
+      await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
+    }catch(err){
+      console.error(err);
+      alert('保存に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
+    }
+    renderDashboard(); // 全データの再取得はせず、更新済みのローカル状態から即座に再描画
   });
 }
 function periodManagerHtml(p){
