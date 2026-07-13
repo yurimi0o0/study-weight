@@ -248,8 +248,9 @@ function scheduleDayDoc(date){ return doc(db, `users/${state.uid}/scheduleDays/$
 function getScheduleDay(date){ return state.scheduleDays.find(d=>d.id===date); }
 function addDays(dateStr,n){ const d=new Date(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
 function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date>=p.startDate && date<=p.endDate); }
-function effectiveTasksFor(date){ const p=findActivePeriod(date); return p ? (p.tasks||[]) : (state.schedule.defaultTasks||[]); }
-function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id])); }
+function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=state.schedule.defaultTasks||[]; return p ? [...base, ...(p.tasks||[])] : base; }
+const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
+function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id]) && dailyMinutesFor(d.date)>=20); }
 async function ensureScheduleDay(date){
   const existing=getScheduleDay(date);
   if(existing){
@@ -352,7 +353,7 @@ function scheduleSettingsHtml(){
     </div>
     <div class='card'>
       <h4>期間（季節ごとの上書き）</h4>
-      <div class='small'>期間中はデフォルトタスクの代わりに、その期間専用のタスクが使われます（例: 夏休み・冬休み）。</div>
+      <div class='small'>期間中は通年のデフォルトタスクに加えて、その期間専用のタスクも追加されます（例: 夏休み・冬休み）。</div>
       <label>期間名</label><input id='pName' placeholder='例: 夏休み'/>
       <div class='row'><div><label>開始日</label><input id='pStart' type='date'/></div><div><label>終了日</label><input id='pEnd' type='date'/></div></div>
       <button id='addPeriod' class='btn small' style='margin-top:8px'>期間を追加</button>
