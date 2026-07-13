@@ -200,6 +200,9 @@ label {
 
 .row { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
 .row > * { flex: 1; }
+/* 常に横並びのまま維持する行（時刻・日付など短い値のペア用。モバイルでも縦積みしない） */
+.row-2 { display: flex; gap: 10px; align-items: stretch; }
+.row-2 > * { flex: 1; min-width: 0; }
 .col { display: flex; flex-direction: column; gap: 10px; }
 .sw-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sw-actions .btn { flex: 1 1 calc(50% - 4px); min-width: 0; }
@@ -404,6 +407,7 @@ label {
 .cal-cell.studied-3 { background: rgba(94, 200, 183, 0.38); color: #eafffa; }
 .cal-cell.studied-4 { background: rgba(94, 200, 183, 0.58); color: #04211b; font-weight: 700; }
 .cal-cell.in-period { box-shadow: inset 0 0 0 1.5px var(--indigo); }
+.cal-cell.selected { background: var(--accent-soft); }
 .cal-cell small { font-size: 0.62rem; line-height: 1; opacity: 0.85; }
 
 /* ---------- ストリーク（主役） ---------- */
