@@ -120,12 +120,21 @@ function renderRecordForm(edit=null){
     <label>学習時間</label><div class='row'><div><label>時間</label><input id='fHour' type='number' min='0' value='${rHour}' /></div><div><label>分</label><input id='fMin' type='number' min='0' max='59' value='${rMin}' /></div></div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
-    <label>教材</label><select id='fMaterial'><option value=''>未選択</option>${state.materials.map(m=>`<option value='${m.id}' ${m.id===r.materialId?'selected':''}>${m.name}</option>`).join('')}</select>
+    <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
     <label>ラベル(複数)</label><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' data-id='${l.id}'>${l.name}</button>`).join('')}</div>
     <div class='row'><div><label>ページ数</label><input id='fPages' type='number' value='${r.pages||''}' /></div><div><label>問題数</label><input id='fProblems' type='number' value='${r.problems||''}' /></div></div>
     <div class='row'><button id='saveRecord' class='btn primary'>保存</button>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}</div>
   </div>`;
   let sw=0, timer=null;
+  // 教科に紐づく教材だけを選択肢に出す（教科未設定の旧教材は全教科で表示）
+  const fillMaterials=(preferred='')=>{
+    const sid=$('#fSubject').value;
+    const opts=state.materials.filter(m=>!m.subjectId || m.subjectId===sid);
+    $('#fMaterial').innerHTML=`<option value=''>未選択</option>`+opts.map(m=>`<option value='${m.id}'>${m.name}</option>`).join('');
+    $('#fMaterial').value = opts.some(m=>m.id===preferred) ? preferred : '';
+  };
+  fillMaterials(r.materialId);
+  $('#fSubject').onchange=()=>fillMaterials($('#fMaterial').value);
   document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{chip.classList.toggle('active');});
   const drawSw=()=>{$('#swDisplay').textContent=new Date(sw*1000).toISOString().slice(11,19);};
   $('#swStart').onclick=()=>{if(timer) return; timer=setInterval(()=>{sw++;drawSw();},1000);};
@@ -157,10 +166,26 @@ const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
 function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}</span><div class='row'><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button><button class='btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}${hasSubject?`<span class='small'>　${subjectName(i.subjectId)}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button>${hasSubject?`<button class='btn small editm' data-id='${i.id}'>編集</button>`:''}<button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
 function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
   document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
+  // 教材のインライン編集（名前・所属教科を変更できる）
+  document.querySelectorAll('.editm').forEach(b=>b.onclick=()=>{
+    const m=state.materials.find(x=>x.id===b.dataset.id); if(!m) return;
+    const rowEl=b.closest('.list-item');
+    rowEl.innerHTML=`<div class='col' style='flex:1'>
+      <input class='edit-name' value='${(m.name||'').replace(/'/g,'&#39;')}' placeholder='教材名'/>
+      <select class='edit-subject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===m.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
+      <div class='row'><button class='btn small primary save-edit'>保存</button><button class='btn small cancel-edit'>キャンセル</button></div>
+    </div>`;
+    rowEl.querySelector('.save-edit').onclick=async()=>{
+      const name=rowEl.querySelector('.edit-name').value.trim(); if(!name) return alert('教材名を入力してください');
+      await updateDoc(userDoc('materials',m.id),{name,subjectId:rowEl.querySelector('.edit-subject').value,updatedAt:new Date().toISOString()});
+      await refresh(); renderSettings('manage');
+    };
+    rowEl.querySelector('.cancel-edit').onclick=()=>renderSettings('manage');
+  });
   $('#backSettings').onclick=()=>renderSettings();
 }
 function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const gHour=Math.floor((state.weekGoal||0)/60), gMin=(state.weekGoal||0)%60; $('#goals').innerHTML=`<div class='card'><h3>今週の目標を設定 / 更新</h3><div class='row'><div><label>時間</label><input id='goalHour' type='number' min='0' value='${gHour}'/></div><div><label>分</label><input id='goalMin' type='number' min='0' max='59' value='${gMin}'/></div></div><button id='saveGoal' class='btn primary'>保存</button><div class='small'>達成率: ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div></div><div class='card'><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div><div class='card'><h3>テスト登録</h3><input id='testName' placeholder='テスト名'/><input id='testDate' type='date'/><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn'>追加</button>${state.tests.map(t=>`<div class='list-item'>${t.name} ${t.date} <span class='small'>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</span> <button class='btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>${renderCalendarCard()}`;
