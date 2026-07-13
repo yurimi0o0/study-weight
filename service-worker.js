@@ -1,4 +1,25 @@
-const CACHE_NAME = 'study-density-log-v5';
+try {
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+  firebase.initializeApp({
+    apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ',
+    authDomain: 'study-weight.firebaseapp.com',
+    projectId: 'study-weight',
+    storageBucket: 'study-weight.firebasestorage.app',
+    messagingSenderId: '850012109401',
+    appId: '1:850012109401:web:6ba78214593f87c7054f48'
+  });
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title = payload?.notification?.title || '通知';
+    const body = payload?.notification?.body || '';
+    self.registration.showNotification(title, { body, tag: 'sdl-push' });
+  });
+} catch (err) {
+  console.error('FCM SW init failed:', err);
+}
+
+const CACHE_NAME = 'study-density-log-v6';
 const APP_SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {

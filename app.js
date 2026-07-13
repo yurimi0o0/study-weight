@@ -5,6 +5,8 @@ import {
 import {
   getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getMessaging, getToken, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
+import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js';
 
 const APP_NAME = 'Study Density Log';
 const DEFAULT_QUALITY = { S: 1.05, A: 1.0, B: 0.55, C: 0.3, D: 0.1 };
@@ -21,10 +23,16 @@ const NOTIFY_HOUR_KEY = 'sdl_notify_hour';
 const firebaseConfig = {
   apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
 };
+// Firebase Console > プロジェクトの設定 > Cloud Messaging > ウェブプッシュ証明書 で生成した鍵を貼り付ける
+const FCM_VAPID_KEY = '';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app);
+let messaging = null; // 未対応ブラウザでgetMessaging(app)が例外を投げるため遅延初期化
+let swReg = null;      // Service Worker登録（getTokenに渡す）
+let currentFcmToken = null;
 const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
 
 const $ = s => document.querySelector(s);
@@ -439,6 +447,63 @@ async function maybeNotifyToday(){
     localStorage.setItem(key, today);
   }catch(_){ /* 通知非対応環境では無視 */ }
 }
+
+// ---- プッシュ通知（FCM, アプリを閉じていても届く。VAPIDキー設定 + Cloud Functionsデプロイが必要） ----
+function fcmTokenDocRef(token){ return userDoc('fcmTokens', token); }
+function getMessagingSafe(){
+  if (messaging) return messaging;
+  try {
+    messaging = getMessaging(app);
+    onMessage(messaging, (payload) => {
+      const title = payload?.notification?.title || '通知';
+      const body = payload?.notification?.body || '';
+      if (swReg) swReg.showNotification(title, { body, tag: 'sdl-push' });
+      else if (Notification.permission === 'granted') new Notification(title, { body });
+    });
+  } catch (_) { messaging = null; }
+  return messaging;
+}
+function refreshPushStatus(){
+  const el = $('#pushStatus'); if (!el) return;
+  if (!FCM_VAPID_KEY) { el.textContent = 'VAPIDキー未設定'; return; }
+  if (!('Notification' in window) || Notification.permission !== 'granted') { el.textContent = '通知未許可'; return; }
+  el.textContent = currentFcmToken ? '登録済み' : '未登録';
+}
+async function registerPush(){
+  if (!FCM_VAPID_KEY) return alert('VAPIDキーが未設定です。Firebase Console > プロジェクトの設定 > Cloud Messaging でウェブプッシュ証明書を生成し、app.js の FCM_VAPID_KEY に設定してください。');
+  if (!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。');
+  if (!swReg) return alert('Service Workerの準備ができていません。少し待ってから再度お試しください。');
+  const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+  if ($('#notifyStatus')) $('#notifyStatus').textContent = perm;
+  if (perm !== 'granted') return alert('通知が許可されませんでした。');
+  const m = getMessagingSafe();
+  if (!m) return alert('この端末・ブラウザはプッシュ通知(FCM)に対応していません。');
+  try {
+    const token = await getToken(m, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: swReg });
+    if (!token) return alert('トークンの取得に失敗しました。');
+    currentFcmToken = token;
+    await setDoc(fcmTokenDocRef(token), { createdAt: new Date().toISOString(), userAgent: navigator.userAgent }, { merge: true });
+    refreshPushStatus();
+    alert('プッシュ通知を登録しました');
+  } catch (err) { console.error('FCM getToken failed:', err); alert(`登録に失敗しました: ${err.message || err}`); }
+}
+async function unregisterPush(){
+  if (!currentFcmToken) return alert('登録済みのトークンがありません。');
+  try { await deleteDoc(fcmTokenDocRef(currentFcmToken)); } catch (err) { console.error('token doc delete failed:', err); }
+  const m = getMessagingSafe();
+  try { if (m) await deleteToken(m); } catch (_) { /* ignore */ }
+  currentFcmToken = null;
+  refreshPushStatus();
+  alert('登録を解除しました');
+}
+async function sendTestPush(){
+  try {
+    const fn = httpsCallable(functions, 'sendTestPush');
+    const res = await fn();
+    alert(`送信結果: 成功${res.data.successCount}件 / 失敗${res.data.failureCount}件`);
+  } catch (err) { console.error('sendTestPush failed:', err); alert(`送信に失敗しました: ${err.message || err}`); }
+}
+
 function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card menu-card'><h3>設定メニュー</h3>
   <button class='menu-row' id='openManage'><span>教科・教材・ラベル管理</span><span class='chev'>›</span></button>
   <button class='menu-row' id='openBackup'><span>バックアップ</span><span class='chev'>›</span></button>
@@ -450,10 +515,14 @@ $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
 $('#openQuality').onclick=()=>renderSettings();
 $('#openNotify').onclick=()=>{
-  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div>`;
+  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div><div class='small' style='margin-top:12px'>アプリを閉じていても届くプッシュ通知（要デプロイ・テスト送信用）</div><div>プッシュ登録状態: <b id='pushStatus'></b></div><div class='row'><button id='pushRegister' class='btn small'>プッシュ通知を登録</button><button id='pushTest' class='btn small'>テスト通知を送信</button><button id='pushUnregister' class='btn danger small'>登録解除</button></div>`;
   $('#notifyStatus').textContent=('Notification' in window)?Notification.permission:'非対応';
   $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); const p=await Notification.requestPermission(); $('#notifyStatus').textContent=p; };
   $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'7'); alert('保存しました'); };
+  refreshPushStatus();
+  $('#pushRegister').onclick=registerPush;
+  $('#pushTest').onclick=sendTestPush;
+  $('#pushUnregister').onclick=unregisterPush;
 };
 $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
@@ -484,6 +553,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker
     .register('/study-weight/service-worker.js')
     .then((reg) => {
+      swReg = reg;
       console.log('Service worker registered');
 
       reg.update().catch(() => {});
