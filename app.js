@@ -10,6 +10,13 @@ const APP_NAME = 'Study Density Log';
 const DEFAULT_QUALITY = { S: 1.05, A: 1.0, B: 0.55, C: 0.3, D: 0.1 };
 const DEFAULT_SUBJECTS = ['英語','数学','国語','社会','理科','情報','その他'];
 const DEFAULT_LABELS = ['自習','学校','学校課題','塾','塾宿題','授業','単語帳','テスト勉強','受験勉強','その他'];
+const DEFAULT_SCHEDULE_TASKS = [
+  { id: 'st1', text: '過去問長文1題' },
+  { id: 'st2', text: '基礎英文解釈の技術100を2題' },
+  { id: 'st3', text: '文法ポラリス1節' },
+  { id: 'st4', text: '単語100個' },
+];
+const NOTIFY_HOUR_KEY = 'sdl_notify_hour';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
@@ -18,7 +25,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null };
+const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
 
 const $ = s => document.querySelector(s);
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -42,6 +49,7 @@ function userCol(path){ return collection(db, `users/${state.uid}/${path}`); }
 function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
 async function ensureSeedData(){
+  await setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true});
   if ((await getDocs(userCol('subjects'))).empty) for (const [i, name] of DEFAULT_SUBJECTS.entries()) await addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   if ((await getDocs(userCol('labels'))).empty) for (const name of DEFAULT_LABELS) await addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
   const settingsRef = doc(db, `users/${state.uid}/settings/main`); if (!(await getDoc(settingsRef)).exists()) await setDoc(settingsRef, { quality: DEFAULT_QUALITY, appName: APP_NAME });
@@ -55,6 +63,9 @@ async function loadAll(){
   const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf())?.targetMinutes)||0;
   const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY };
+  const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
+  state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
+  state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
 }
 
 function aggregate(){
@@ -70,7 +81,8 @@ function renderDashboard(){
   const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
-  $('#dashboard').innerHTML=`<div class='card'><h3>学習推移</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div>
+  $('#dashboard').innerHTML=`${renderScheduleStreakCard()}
+  <div class='card'><h3>学習推移</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div></div>
   <div class='card'><h3>目標とテスト</h3><div>今週目標: ${fmtH(state.weekGoal)} / 達成率 ${(state.weekGoal?Math.round(a.week/state.weekGoal*100):0)}%</div><div class='small'>次のテスト: ${next?`${next.name}（あと${days}日）`:'未登録'}</div></div>
   <div class='card'><h3>直近7日 学習推移（実時間）</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
@@ -168,17 +180,197 @@ function renderCalendarCard(){
   return `<div class='card'><h3>カレンダー</h3><div class='row'><button class='btn small' id='calPrev'>前月</button><div class='small'>${state.calendarMonth}</div><button class='btn small' id='calNext'>次月</button><button class='btn small' id='calToday'>今月</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}</div></div>`;
 }
 function renderCalendarDayRecords(dayInfo,date){ if(!dayInfo) return `<div class='small'>日付をタップするとその日の記録を表示します。</div>`; return `<h4>${date} の記録</h4>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`; }
-function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><div class='col'><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
+
+// ---- スケジュール（通年ベース + 季節ごとの期間上書き） ----
+function scheduleDayDoc(date){ return doc(db, `users/${state.uid}/scheduleDays/${date}`); }
+function getScheduleDay(date){ return state.scheduleDays.find(d=>d.id===date); }
+function addDays(dateStr,n){ const d=new Date(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date>=p.startDate && date<=p.endDate); }
+function effectiveTasksFor(date){ const p=findActivePeriod(date); return p ? (p.tasks||[]) : (state.schedule.defaultTasks||[]); }
+function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id])); }
+async function ensureScheduleDay(date){
+  const existing=getScheduleDay(date); if(existing) return existing;
+  if(!state.schedule.startDate || date<state.schedule.startDate) return null;
+  const data={ date, tasks: effectiveTasksFor(date), done:{}, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
+  await setDoc(scheduleDayDoc(date), data);
+  const entry={id:date,...data}; state.scheduleDays.push(entry); return entry;
+}
+async function toggleScheduleTask(date,taskId){
+  const d=await ensureScheduleDay(date); if(!d) return;
+  const done={...(d.done||{}), [taskId]: !d.done?.[taskId]};
+  await setDoc(scheduleDayDoc(date), {...d,done,updatedAt:new Date().toISOString()}, {merge:true});
+  d.done=done;
+}
+function scheduleCarryover(){
+  const today=logicalDateStr(); const yesterday=addDays(today,-1);
+  if(!state.schedule.startDate || yesterday<state.schedule.startDate) return [];
+  const yd=getScheduleDay(yesterday);
+  const tasks=yd?yd.tasks:effectiveTasksFor(yesterday);
+  const done=yd?(yd.done||{}):{};
+  return tasks.filter(t=>!done[t.id]).map(t=>({...t,date:yesterday}));
+}
+function computeScheduleStreak(){
+  const {startDate}=state.schedule||{};
+  if(!startDate) return { current:0, broken:null };
+  const today=logicalDateStr();
+  const dates=[]; for(let d=startDate; d<=today; d=addDays(d,1)) dates.push(d);
+  const judged=dates.filter(dt=> dt<today || (dt===today && isDayComplete(getScheduleDay(today))));
+  let running=0, lastBreakLen=0, brokenOn=null;
+  judged.forEach(dt=>{
+    if(isDayComplete(getScheduleDay(dt))) running++;
+    else { if(running>0){ lastBreakLen=running; brokenOn=dt; } running=0; }
+  });
+  return { current:running, broken:(running===0 && lastBreakLen>0)?{length:lastBreakLen,date:brokenOn}:null };
+}
+function scheduleTodayHtml(){
+  const today=logicalDateStr();
+  const d=getScheduleDay(today);
+  const tasks=d?d.tasks:effectiveTasksFor(today);
+  const done=d?(d.done||{}):{};
+  const carry=scheduleCarryover();
+  const streak=computeScheduleStreak();
+  const activePeriod=findActivePeriod(today);
+  return `
+  <div class='card'>
+    <h3>ストリーク</h3>
+    <div class='streak-big ${streak.current>0?'':'streak-zero'}'>${streak.current}<span class='unit'>日連続</span></div>
+    ${streak.broken?`<div class='streak-broken'>${streak.broken.date} に ${streak.broken.length}日 のストリークが途切れました</div>`:''}
+  </div>
+  ${carry.length?`<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${t.text}</span></label>`).join('')}</div>`:''}
+  <div class='card'>
+    <h3>今日のタスク（${today}）${activePeriod?`<span class='small'> / ${activePeriod.name}期間中</span>`:''}</h3>
+    ${tasks.length===0?'<div class="small">デフォルトタスク未登録</div>':tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${t.text}</span></label>`).join('')}
+  </div>`;
+}
+function periodManagerHtml(p){
+  return `<div class='card'>
+    <div class='row'><b>${p.name}</b><button class='btn danger small delPeriod' data-id='${p.id}'>期間を削除</button></div>
+    <div class='small'>${p.startDate} 〜 ${p.endDate}</div>
+    <div class='row'><input id='pNewTask-${p.id}' placeholder='タスク名'/><button class='btn small addPeriodTask' data-id='${p.id}'>追加</button></div>
+    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${t.text}</span><button class='btn danger small delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+  </div>`;
+}
+async function renderSchedule(){
+  const box=$('#schedule'); box.innerHTML=`<div class='card small'>読み込み中...</div>`;
+  const today=logicalDateStr();
+  if(state.schedule.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today);
+  const {startDate=''}=state.schedule||{};
+  const defaultTasks=state.schedule?.defaultTasks||[];
+  const periods=state.schedulePeriods||[];
+  box.innerHTML=`
+    <div class='card'>
+      <h3>スケジュール設定</h3>
+      <label>トラッキング開始日</label><input id='schStart' type='date' value='${startDate}'/>
+      <button id='schSaveStart' class='btn primary small'>開始日を保存</button>
+    </div>
+    <div class='card'>
+      <h3>通年のデフォルトタスク</h3>
+      <div class='row'><input id='schNewTask' placeholder='タスク名（例: 単語100個）'/><button id='schAddTask' class='btn small'>追加</button></div>
+      ${defaultTasks.length===0?`<button id='schUseTemplate' class='btn small'>例テンプレートを使う</button>`:''}
+      ${defaultTasks.map(t=>`<div class='list-item'><span>${t.text}</span><button class='btn danger small delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+    </div>
+    <div class='card'>
+      <h3>期間（季節ごとの上書き）</h3>
+      <div class='small'>期間中はデフォルトタスクの代わりに、その期間専用のタスクが使われます（例: 夏休み・冬休みなど）。</div>
+      <label>期間名</label><input id='pName' placeholder='例: 夏休み'/>
+      <div class='row'><div><label>開始日</label><input id='pStart' type='date'/></div><div><label>終了日</label><input id='pEnd' type='date'/></div></div>
+      <button id='addPeriod' class='btn small'>期間を追加</button>
+    </div>
+    ${periods.map(periodManagerHtml).join('')}
+    ${startDate?scheduleTodayHtml():'<div class="card small">トラッキング開始日を設定するとタスクチェックが使えます。</div>'}
+  `;
+  $('#schSaveStart').onclick=async()=>{
+    const s=$('#schStart').value; if(!s) return alert('開始日を選択してください。');
+    await setDoc(doc(db,`users/${state.uid}/settings/schedule`), {...state.schedule,startDate:s,updatedAt:new Date().toISOString()}, {merge:true});
+    await refresh();
+  };
+  $('#schAddTask').onclick=async()=>{
+    const text=$('#schNewTask').value.trim(); if(!text) return;
+    const newTasks=[...(state.schedule.defaultTasks||[]), {id:'t'+Date.now()+Math.random().toString(36).slice(2,6), text}];
+    await setDoc(doc(db,`users/${state.uid}/settings/schedule`), {...state.schedule,defaultTasks:newTasks,updatedAt:new Date().toISOString()}, {merge:true});
+    await refresh();
+  };
+  if($('#schUseTemplate')) $('#schUseTemplate').onclick=async()=>{
+    await setDoc(doc(db,`users/${state.uid}/settings/schedule`), {...state.schedule,defaultTasks:DEFAULT_SCHEDULE_TASKS.map(t=>({...t})),updatedAt:new Date().toISOString()}, {merge:true});
+    await refresh();
+  };
+  document.querySelectorAll('.delSchTask').forEach(b=>b.onclick=async()=>{
+    const newTasks=(state.schedule.defaultTasks||[]).filter(t=>t.id!==b.dataset.id);
+    await setDoc(doc(db,`users/${state.uid}/settings/schedule`), {...state.schedule,defaultTasks:newTasks,updatedAt:new Date().toISOString()}, {merge:true});
+    await refresh();
+  });
+  $('#addPeriod').onclick=async()=>{
+    const name=$('#pName').value.trim(), s=$('#pStart').value, e=$('#pEnd').value;
+    if(!name||!s||!e||s>e) return alert('期間名・開始日・終了日を正しく入力してください。');
+    await addDoc(userCol('schedulePeriods'), { name, startDate:s, endDate:e, tasks:[], order:periods.length, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+    await refresh();
+  };
+  document.querySelectorAll('.delPeriod').forEach(b=>b.onclick=async()=>{
+    if(!confirm('この期間を削除しますか？')) return;
+    await deleteDoc(userDoc('schedulePeriods', b.dataset.id)); await refresh();
+  });
+  document.querySelectorAll('.addPeriodTask').forEach(b=>b.onclick=async()=>{
+    const pid=b.dataset.id; const input=$(`#pNewTask-${pid}`); const text=input.value.trim(); if(!text) return;
+    const p=periods.find(x=>x.id===pid); const newTasks=[...(p.tasks||[]), {id:'t'+Date.now()+Math.random().toString(36).slice(2,6), text}];
+    await updateDoc(userDoc('schedulePeriods',pid), {tasks:newTasks,updatedAt:new Date().toISOString()});
+    await refresh();
+  });
+  document.querySelectorAll('.delPeriodTask').forEach(b=>b.onclick=async()=>{
+    const p=periods.find(x=>x.id===b.dataset.pid); const newTasks=(p.tasks||[]).filter(t=>t.id!==b.dataset.id);
+    await updateDoc(userDoc('schedulePeriods',b.dataset.pid), {tasks:newTasks,updatedAt:new Date().toISOString()});
+    await refresh();
+  });
+  document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
+    await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
+    await refresh();
+  });
+}
+function renderScheduleStreakCard(){
+  if(!state.schedule?.startDate) return '';
+  const s=computeScheduleStreak();
+  return `<div class='card'><h3>学習ストリーク</h3><div class='streak-big ${s.current>0?'':'streak-zero'}'>${s.current}<span class='unit'>日連続</span></div>${s.broken?`<div class='streak-broken'>${s.broken.date} に ${s.broken.length}日 のストリークが途切れました</div>`:''}</div>`;
+}
+
+// ---- 通知（アプリを開いた時に「今日のタスク」をローカル通知） ----
+function notifyHour(){ return +(localStorage.getItem(NOTIFY_HOUR_KEY)||7); }
+async function maybeNotifyToday(){
+  if(!state.uid || !('Notification' in window) || Notification.permission!=='granted') return;
+  if(!('serviceWorker' in navigator)) return;
+  const today=logicalDateStr();
+  const key=`sdl_last_notified_${state.uid}`;
+  if(localStorage.getItem(key)===today) return;
+  if(new Date().getHours() < notifyHour()) return;
+  let body='今日も学習を記録しましょう。';
+  if(state.schedule?.startDate && today>=state.schedule.startDate){
+    const d=getScheduleDay(today);
+    const tasks=d?d.tasks:effectiveTasksFor(today);
+    const done=d?(d.done||{}):{};
+    const remaining=tasks.filter(t=>!done[t.id]);
+    if(tasks.length) body=remaining.length?`未完了: ${remaining.map(t=>t.text).join(' / ')}`:'今日のタスクは完了済みです！';
+  }
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    await reg.showNotification('今日のタスク', { body, tag:'sdl-daily' });
+    localStorage.setItem(key, today);
+  }catch(_){ /* 通知非対応環境では無視 */ }
+}
+function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card'><h3>設定メニュー</h3><div class='col'><button id='openManage' class='btn'>教科・教材・ラベル管理</button><button id='openBackup' class='btn'>バックアップ</button><button id='openQuality' class='btn'>質係数</button><button id='openNotify' class='btn'>通知設定</button><button id='settingsLogout' class='btn danger'>ログアウト</button></div></div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div>`;
 $('#settingsPanel').innerHTML = `<h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button>`;
 $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
 $('#openQuality').onclick=()=>renderSettings();
+$('#openNotify').onclick=()=>{
+  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div>`;
+  $('#notifyStatus').textContent=('Notification' in window)?Notification.permission:'非対応';
+  $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); const p=await Notification.requestPermission(); $('#notifyStatus').textContent=p; };
+  $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'7'); alert('保存しました'); };
+};
 $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
 document.addEventListener('click', async(e)=>{ if(e.target?.id==='exp'){const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();} if(e.target?.id==='imp'){const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();} if(e.target?.id==='wipe'){if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}} , {once:true}); }
 
-function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); }
+function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='schedule') renderSchedule(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
+async function refresh(){ await loadAll(); ['dashboard','record','list','goals','schedule','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
 
 $('#appTitle').textContent = APP_NAME;
 $('#loginBtn').onclick=async()=>{
@@ -197,6 +389,7 @@ onAuthStateChanged(auth, async user=>{
   state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker
     .register('/study-weight/service-worker.js')
