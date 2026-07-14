@@ -24,7 +24,7 @@ const firebaseConfig = {
   apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
 };
 // Firebase Console > プロジェクトの設定 > Cloud Messaging > ウェブプッシュ証明書 で生成した鍵を貼り付ける
-const FCM_VAPID_KEY = '';
+const FCM_VAPID_KEY = 'BI5D69jRhWmow6YoJh2QRpXk6XHiJLckmQsoQRrzVkvCWwOh3w7H1adDOjPneVUxeweGU-jhKgPxghVmh7wT5Ds';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -99,8 +99,7 @@ async function renderDashboard(){
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
   const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
   $('#dashboard').innerHTML=`${renderScheduleStreakCard()}
-  ${carryoverHtml()}
-  ${todayTasksHtml()}
+  ${tasksCardHtml()}
   <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
   ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${escapeHtml(next.name)}（あと${days}日）</div>`:''}</div>
@@ -308,14 +307,13 @@ function computeScheduleStreak(){
   });
   return { current:running, broken:(running===0 && lastBreakLen>0)?{length:lastBreakLen,date:brokenOn}:null };
 }
-function carryoverHtml(){
-  const carry=scheduleCarryover();
-  if(!carry.length) return '';
-  return `<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${escapeHtml(t.text)}</span></label>`).join('')}</div>`;
-}
-function todayTasksHtml(){
+const pendingCarryoverFade = new Map(); // 繰り越し完了直後、フェード演出のため一時的に表示を維持するタスクのスナップショット
+function tasksCardHtml(){
   if(!state.schedule?.startDate) return '';
   const today=logicalDateStr();
+  const carryLive=scheduleCarryover();
+  const carryExtra=[...pendingCarryoverFade.values()].filter(p=>!carryLive.some(c=>c.id===p.id));
+  const carry=[...carryLive, ...carryExtra];
   const d=getScheduleDay(today);
   const tasks=d?d.tasks:effectiveTasksFor(today);
   const done=d?(d.done||{}):{};
@@ -324,20 +322,37 @@ function todayTasksHtml(){
   const emptyMsg=activePeriod
     ?`「${escapeHtml(activePeriod.name)}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
     :'タスクが未登録です。目標タブ下部の設定から追加してください。';
+  const carryNote=carryLive.length?`${carryLive[0].date}分の繰り越し${carryLive.length}件 ・ `:'';
+  const carryRows=carry.map(t=>{
+    const pending=pendingCarryoverFade.has(t.id);
+    return `<label class='list-item carry-item${pending?' completing':''}'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${pending?'checked disabled':''}/><span>${escapeHtml(t.text)}</span><span class='tag tag-carry'>繰り越し</span></label>`;
+  }).join('');
+  const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
   return `<div class='card'>
-    <h3>今日のタスク <span class='small'>${activePeriod?`${escapeHtml(activePeriod.name)}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
-    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('')}
+    <h3>今日のタスク <span class='small'>${carryNote}${activePeriod?`${escapeHtml(activePeriod.name)}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
+    ${carryRows}
+    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:todayRows}
   </div>`;
 }
 function bindScheduleChecks(){
   document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
+    const isCarryCheck=cb.classList.contains('schCarryCheck') && cb.checked;
     try{
+      if(isCarryCheck){
+        pendingCarryoverFade.set(cb.dataset.id, {date:cb.dataset.date, id:cb.dataset.id, text:cb.closest('label').querySelector('span').textContent});
+        cb.closest('label').classList.add('completing');
+      }
       await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
     }catch(err){
       console.error(err);
+      pendingCarryoverFade.delete(cb.dataset.id);
       alert('保存に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
     }
-    renderDashboard(); // 全データの再取得はせず、更新済みのローカル状態から即座に再描画
+    if(isCarryCheck){
+      setTimeout(()=>{ pendingCarryoverFade.delete(cb.dataset.id); renderDashboard(); }, 450); // 即消えると分かりづらいため一呼吸置く
+    }else{
+      renderDashboard(); // 全データの再取得はせず、更新済みのローカル状態から即座に再描画
+    }
   });
 }
 function periodManagerHtml(p){
@@ -425,14 +440,19 @@ function renderScheduleStreakCard(){
 }
 
 // ---- 通知（アプリを開いた時に「今日のタスク」をローカル通知） ----
-function notifyHour(){ return +(localStorage.getItem(NOTIFY_HOUR_KEY)||7); }
+function notifyTimeStr(){
+  const v=localStorage.getItem(NOTIFY_HOUR_KEY);
+  if(!v) return '07:00';
+  return /^\d{1,2}$/.test(v) ? `${v.padStart(2,'0')}:00` : v; // 旧「時のみ」設定からの移行
+}
 async function maybeNotifyToday(){
   if(!state.uid || !('Notification' in window) || Notification.permission!=='granted') return;
   if(!('serviceWorker' in navigator)) return;
   const today=logicalDateStr();
   const key=`sdl_last_notified_${state.uid}`;
   if(localStorage.getItem(key)===today) return;
-  if(new Date().getHours() < notifyHour()) return;
+  const nowMinutes = new Date().getHours()*60 + new Date().getMinutes();
+  if(nowMinutes < minFromTime(notifyTimeStr())) return;
   let body='今日も学習を記録しましょう。';
   if(state.schedule?.startDate && today>=state.schedule.startDate){
     const d=getScheduleDay(today);
@@ -515,10 +535,10 @@ $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
 $('#openQuality').onclick=()=>renderSettings();
 $('#openNotify').onclick=()=>{
-  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div><div class='small' style='margin-top:12px'>アプリを閉じていても届くプッシュ通知（要デプロイ・テスト送信用）</div><div>プッシュ登録状態: <b id='pushStatus'></b></div><div class='row'><button id='pushRegister' class='btn small'>プッシュ通知を登録</button><button id='pushTest' class='btn small'>テスト通知を送信</button><button id='pushUnregister' class='btn danger small'>登録解除</button></div>`;
+  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻</label><input id='notifyHourInput' type='time' value='${notifyTimeStr()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div><div class='small' style='margin-top:12px'>アプリを閉じていても届くプッシュ通知（要デプロイ・テスト送信用）</div><div>プッシュ登録状態: <b id='pushStatus'></b></div><div class='row'><button id='pushRegister' class='btn small'>プッシュ通知を登録</button><button id='pushTest' class='btn small'>テスト通知を送信</button><button id='pushUnregister' class='btn danger small'>登録解除</button></div>`;
   $('#notifyStatus').textContent=('Notification' in window)?Notification.permission:'非対応';
   $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); const p=await Notification.requestPermission(); $('#notifyStatus').textContent=p; };
-  $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'7'); alert('保存しました'); };
+  $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'07:00'); alert('保存しました'); };
   refreshPushStatus();
   $('#pushRegister').onclick=registerPush;
   $('#pushTest').onclick=sendTestPush;
