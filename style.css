@@ -263,8 +263,10 @@ label {
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+  transition: opacity .3s ease;
 }
 .list-item > div:only-child, .list-item > span:only-child { flex: 1; }
+.completing { opacity: .45; pointer-events: none; }
 .timeline-card {
   display: block;
   border-left: 3px solid var(--accent);
@@ -440,6 +442,7 @@ label {
   background: var(--danger-soft);
 }
 .carry-item span { color: #f0b0aa; }
+.tag.tag-carry { background: var(--danger-soft); color: var(--danger); }
 
 /* ---------- チェックリスト ---------- */
 label.list-item {
