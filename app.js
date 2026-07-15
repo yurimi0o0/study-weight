@@ -5,6 +5,8 @@ import {
 import {
   getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getMessaging, getToken, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
+import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js';
 
 const APP_NAME = 'Study Density Log';
 const DEFAULT_QUALITY = { S: 1.05, A: 1.0, B: 0.55, C: 0.3, D: 0.1 };
@@ -17,6 +19,7 @@ const DEFAULT_SCHEDULE_TASKS = [
   { id: 'st4', text: '単語100個' },
 ];
 const NOTIFY_HOUR_KEY = 'sdl_notify_hour';
+const FCM_VAPID_KEY = 'BI5D69jRhWmow6YoJh2QRpXk6XHiJLckmQsoQRrzVkvCWwOh3w7H1adDOjPneVUxeweGU-jhKgPxghVmh7wT5Ds';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
@@ -25,6 +28,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app);
+let messaging = null;
+let swReg = null;
+let currentFcmToken = null;
 const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [], selfStudyDays: [] };
 
 const $ = s => document.querySelector(s);
@@ -450,15 +457,10 @@ function renderScheduleStreakCard(){
   return `<div class='card'><h3>学習ストリーク</h3><div class='streak-big ${s.current>0?'':'streak-zero'}'>${s.current}<span class='unit'>日連続</span></div>${s.broken?`<div class='streak-broken'>${s.broken.date} に ${s.broken.length}日 のストリークが途切れました</div>`:''}</div>`;
 }
 
-// ---- 通知（アプリを開いた時に「今日のタスク」をローカル通知） ----
+// ---- 通知（ローカル通知 + FCMプッシュ通知） ----
 function notifyHour(){ return +(localStorage.getItem(NOTIFY_HOUR_KEY)||7); }
-async function maybeNotifyToday(){
-  if(!state.uid || !('Notification' in window) || Notification.permission!=='granted') return;
-  if(!('serviceWorker' in navigator)) return;
+function notificationBodyForToday(){
   const today=logicalDateStr();
-  const key=`sdl_last_notified_${state.uid}`;
-  if(localStorage.getItem(key)===today) return;
-  if(new Date().getHours() < notifyHour()) return;
   let body='今日も学習を記録しましょう。';
   if(state.schedule?.startDate && today>=state.schedule.startDate){
     const d=getScheduleDay(today);
@@ -467,11 +469,71 @@ async function maybeNotifyToday(){
     const remaining=tasks.filter(t=>!done[t.id]);
     if(tasks.length) body=remaining.length?`未完了: ${remaining.map(t=>t.text).join(' / ')}`:'今日のタスクは完了済みです！';
   }
+  return body;
+}
+async function maybeNotifyToday(){
+  if(!state.uid || !('Notification' in window) || Notification.permission!=='granted') return;
+  if(!('serviceWorker' in navigator)) return;
+  const today=logicalDateStr();
+  const key=`sdl_last_notified_${state.uid}`;
+  if(localStorage.getItem(key)===today) return;
+  if(new Date().getHours() < notifyHour()) return;
   try{
     const reg=await navigator.serviceWorker.ready;
-    await reg.showNotification('今日のタスク', { body, tag:'sdl-daily' });
+    await reg.showNotification('今日のタスク', { body: notificationBodyForToday(), tag:'sdl-daily' });
     localStorage.setItem(key, today);
   }catch(_){ /* 通知非対応環境では無視 */ }
+}
+async function ensureMessaging(){
+  if(messaging) return messaging;
+  if(!('Notification' in window) || !('serviceWorker' in navigator)) return null;
+  messaging=getMessaging(app);
+  onMessage(messaging, (payload)=>{
+    const title=payload.notification?.title || payload.data?.title || 'Study Density Log';
+    const body=payload.notification?.body || payload.data?.body || notificationBodyForToday();
+    if(Notification.permission==='granted') new Notification(title, { body, tag: payload.data?.tag || 'sdl-fcm' });
+  });
+  return messaging;
+}
+async function enablePushNotifications(){
+  if(!state.uid) return alert('ログイン後に設定してください。');
+  if(!('Notification' in window) || !('serviceWorker' in navigator)) return alert('この端末・ブラウザは通知に対応していません。');
+  const permission=await Notification.requestPermission();
+  if(permission!=='granted') return alert('通知が許可されませんでした。ブラウザ/OS設定を確認してください。');
+  const msg=await ensureMessaging();
+  if(!msg) return alert('この環境ではプッシュ通知を初期化できませんでした。');
+  const registration=swReg || await navigator.serviceWorker.ready;
+  const token=await getToken(msg, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
+  if(!token) return alert('通知トークンを取得できませんでした。');
+  currentFcmToken=token;
+  await setDoc(doc(db, `users/${state.uid}/fcmTokens/${token}`), { token, notifyHour:notifyHour(), userAgent:navigator.userAgent, updatedAt:new Date().toISOString(), createdAt:new Date().toISOString() }, { merge:true });
+  alert('プッシュ通知を有効にしました。');
+  renderSettings();
+}
+async function disablePushNotifications(){
+  if(!currentFcmToken) return alert('この端末の通知トークンは未登録です。');
+  const token=currentFcmToken;
+  const msg=await ensureMessaging();
+  if(msg) await deleteToken(msg).catch(()=>{});
+  await deleteDoc(doc(db, `users/${state.uid}/fcmTokens/${token}`)).catch(()=>{});
+  currentFcmToken=null;
+  alert('この端末のプッシュ通知を解除しました。');
+  renderSettings();
+}
+async function sendTestPushNotification(){
+  const call=httpsCallable(functions, 'sendTestNotification');
+  await call({ body: notificationBodyForToday() });
+  alert('テスト通知を送信しました。届かない場合はFunctions/FCM設定を確認してください。');
+}
+async function initPushMessaging(){
+  if(!state.uid || !('Notification' in window) || Notification.permission!=='granted') return;
+  try{
+    const msg=await ensureMessaging();
+    if(!msg) return;
+    const registration=swReg || await navigator.serviceWorker.ready;
+    currentFcmToken=await getToken(msg, { vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: registration });
+    if(currentFcmToken) await setDoc(doc(db, `users/${state.uid}/fcmTokens/${currentFcmToken}`), { token:currentFcmToken, notifyHour:notifyHour(), userAgent:navigator.userAgent, updatedAt:new Date().toISOString() }, { merge:true });
+  }catch(err){ console.warn('FCM init skipped:', err); }
 }
 function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card menu-card'><h3>設定メニュー</h3>
   <button class='menu-row' id='openManage'><span>教科・教材・ラベル管理</span><span class='chev'>›</span></button>
@@ -484,10 +546,12 @@ $('#openManage').onclick=()=>renderSettings('manage');
 $('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
 $('#openQuality').onclick=()=>renderSettings();
 $('#openNotify').onclick=()=>{
-  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div>`;
+  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>通常はアプリを開いた時にローカル通知します。プッシュ通知を有効化すると、Cloud Functions/FCM側のスケジュール送信からアプリを閉じていても通知できます。</div><div>許可状態: <b id='notifyStatus'></b></div><div class='small'>この端末: ${currentFcmToken?'プッシュ通知登録済み':'未登録'}</div><label>通知する時刻（時）</label><input id='notifyHourInput' type='number' min='0' max='23' value='${notifyHour()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>プッシュ通知を有効化</button><button id='notifyTest' class='btn small'>テスト送信</button></div><div class='row'><button id='notifySave' class='btn small'>時刻を保存</button><button id='notifyDisable' class='btn small danger'>この端末を解除</button></div>`;
   $('#notifyStatus').textContent=('Notification' in window)?Notification.permission:'非対応';
-  $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); const p=await Notification.requestPermission(); $('#notifyStatus').textContent=p; };
-  $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'7'); alert('保存しました'); };
+  $('#notifyEnable').onclick=enablePushNotifications;
+  $('#notifyTest').onclick=async()=>{ try{ await sendTestPushNotification(); }catch(err){ console.error(err); alert('テスト通知の送信に失敗しました。Functionsが未デプロイの可能性があります。'); } };
+  $('#notifySave').onclick=async()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'7'); if(currentFcmToken) await setDoc(doc(db, `users/${state.uid}/fcmTokens/${currentFcmToken}`), {notifyHour:notifyHour(), updatedAt:new Date().toISOString()}, {merge:true}); alert('保存しました'); };
+  $('#notifyDisable').onclick=disablePushNotifications;
 };
 $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
@@ -535,13 +599,14 @@ onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
   if(!user){ state.uid=null; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
   state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
-  await ensureSeedData(); await refresh(); switchScreen('dashboard');
+  await ensureSeedData(); await refresh(); await initPushMessaging(); switchScreen('dashboard');
 });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker
     .register('./service-worker.js')
     .then((reg) => {
+      swReg = reg;
       console.log('Service worker registered');
 
       reg.update().catch(() => {});
