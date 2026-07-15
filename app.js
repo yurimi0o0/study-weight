@@ -33,7 +33,7 @@ const functions = getFunctions(app);
 let messaging = null; // 未対応ブラウザでgetMessaging(app)が例外を投げるため遅延初期化
 let swReg = null;      // Service Worker登録（getTokenに渡す）
 let currentFcmToken = null;
-const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
+const state = { uid: null, userName: '', userEmail: '', subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
 
 const $ = s => document.querySelector(s);
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -80,7 +80,6 @@ async function loadAll(){
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
   state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
-  state.selfStudyDays=(await getDocs(userCol('selfStudyDays'))).docs.map(d=>({id:d.id,...d.data()}));
 }
 
 function aggregate(){
@@ -193,22 +192,27 @@ const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
 function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${escapeHtml(i.name)}${hasSubject?`<span class='small'>　${escapeHtml(subjectName(i.subjectId))}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button>${hasSubject?`<button class='btn small editm' data-id='${i.id}'>編集</button>`:''}<button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${escapeHtml(i.name)}${hasSubject?`<span class='small'>　${escapeHtml(subjectName(i.subjectId))}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button><button class='btn small editm' data-key='${key}' data-id='${i.id}'>編集</button><button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
 function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
   document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
-  // 教材のインライン編集（名前・所属教科を変更できる）
+  // インライン編集（名前の変更。教材のみ所属教科も変更できる）
   document.querySelectorAll('.editm').forEach(b=>b.onclick=()=>{
-    const m=state.materials.find(x=>x.id===b.dataset.id); if(!m) return;
+    const key=b.dataset.key;
+    const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels);
+    const item=arr.find(x=>x.id===b.dataset.id); if(!item) return;
+    const label=key==='subjects'?'教科':(key==='materials'?'教材':'ラベル');
     const rowEl=b.closest('.list-item');
     rowEl.innerHTML=`<div class='col' style='flex:1'>
-      <input class='edit-name' value='${attr(m.name||'')}' placeholder='教材名'/>
-      <select class='edit-subject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===m.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
+      <input class='edit-name' value='${attr(item.name||'')}' placeholder='${label}名'/>
+      ${key==='materials'?`<select class='edit-subject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===item.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>`:''}
       <div class='row'><button class='btn small primary save-edit'>保存</button><button class='btn small cancel-edit'>キャンセル</button></div>
     </div>`;
     rowEl.querySelector('.save-edit').onclick=async()=>{
-      const name=rowEl.querySelector('.edit-name').value.trim(); if(!name) return alert('教材名を入力してください');
-      await updateDoc(userDoc('materials',m.id),{name,subjectId:rowEl.querySelector('.edit-subject').value,updatedAt:new Date().toISOString()});
+      const name=rowEl.querySelector('.edit-name').value.trim(); if(!name) return alert(`${label}名を入力してください`);
+      const patch={name,updatedAt:new Date().toISOString()};
+      if(key==='materials') patch.subjectId=rowEl.querySelector('.edit-subject').value;
+      await updateDoc(userDoc(key,item.id),patch);
       await refresh(); renderSettings('manage');
     };
     rowEl.querySelector('.cancel-edit').onclick=()=>renderSettings('manage');
@@ -235,8 +239,6 @@ $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number
 $('#calNext').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
 $('#calToday').onclick=()=>{state.calendarMonth=logicalDateStr().slice(0,7); state.selectedDate=null; renderGoals();};
 document.querySelectorAll('.cal-cell[data-date]').forEach(c=>c.onclick=()=>{state.selectedDate=c.dataset.date; renderGoals();});
-markSelfStudyCalendarCells();
-injectSelfStudyCalendarCheck();
 }
 function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
@@ -244,38 +246,6 @@ function renderCalendarCard(){
   const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
   const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
   return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
-}
-
-function getSelfStudyDay(date){ return (state.selfStudyDays||[]).find(d=>d.id===date || d.date===date); }
-function isSelfStudyDone(date){ return !!getSelfStudyDay(date)?.done; }
-function markSelfStudyCalendarCells(){
-  document.querySelectorAll('.cal-cell[data-date]').forEach(cell=>{
-    const done=isSelfStudyDone(cell.dataset.date);
-    cell.classList.toggle('self-study-done', done);
-    if(done){
-      const marker=cell.querySelector('small');
-      if(marker) marker.textContent='室';
-    }
-  });
-}
-function injectSelfStudyCalendarCheck(){
-  const wrap=$('#calDayRecords');
-  const date=state.selectedDate;
-  if(!wrap || !date) return;
-  wrap.insertAdjacentHTML('afterbegin', `<div class='cal-check-card'><label class='list-item cal-check'><input type='checkbox' class='selfStudyCheck' data-date='${date}' ${isSelfStudyDone(date)?'checked':''}/><span>自習室に行った</span></label></div>`);
-  wrap.querySelector('.selfStudyCheck').onchange=async(e)=>{
-    try{ await toggleSelfStudyDay(e.target.dataset.date); renderGoals(); }
-    catch(err){ console.error(err); alert('自習室チェックの保存に失敗しました。通信環境をご確認ください。'); }
-  };
-}
-async function toggleSelfStudyDay(date){
-  const existing=getSelfStudyDay(date);
-  const done=!existing?.done;
-  const data={date, done, updatedAt:new Date().toISOString()};
-  if(!existing) data.createdAt=data.updatedAt;
-  await setDoc(doc(db, `users/${state.uid}/selfStudyDays/${date}`), data, {merge:true});
-  if(existing) existing.done=done;
-  else { if(!state.selfStudyDays) state.selfStudyDays=[]; state.selfStudyDays.push({id:date,...data}); }
 }
 
 function renderCalendarDayRecords(dayInfo,date){
@@ -560,7 +530,7 @@ async function sendTestPush(){
   } catch (err) { console.error('sendTestPush failed:', err); alert(`送信に失敗しました: ${err.message || err}`); }
 }
 
-function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card menu-card'><h3>設定メニュー</h3>
+function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card small'>ログイン中: <b>${escapeHtml(state.userName||state.userEmail||'不明')}</b>${state.userName&&state.userEmail?`<br>${escapeHtml(state.userEmail)}`:''}</div><div class='card menu-card'><h3>設定メニュー</h3>
   <button class='menu-row' id='openManage'><span>教科・教材・ラベル管理</span><span class='chev'>›</span></button>
   <button class='menu-row' id='openBackup'><span>バックアップ</span><span class='chev'>›</span></button>
   <button class='menu-row' id='openQuality'><span>質係数</span><span class='chev'>›</span></button>
@@ -600,8 +570,8 @@ $('#loginBtn').onclick=async()=>{
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ state.uid=null; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
-  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
+  if(!user){ state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
+  state.uid=user.uid; state.userName=user.displayName||''; state.userEmail=user.email||''; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
