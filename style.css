@@ -592,3 +592,27 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 @media (max-width: 560px) {
   .row { flex-direction: column; }
 }
+.cal-cell.self-study-done {
+  border-color: rgba(217, 179, 107, 0.8);
+  box-shadow: inset 0 0 0 1.5px var(--gold), 0 0 10px rgba(217, 179, 107, 0.12);
+}
+.cal-cell.self-study-done small {
+  color: var(--gold);
+  font-weight: 800;
+  opacity: 1;
+}
+.cal-check-card {
+  margin: 12px 0 10px;
+}
+label.cal-check {
+  border-color: rgba(217, 179, 107, 0.45);
+  background: rgba(217, 179, 107, 0.10);
+}
+label.cal-check input[type="checkbox"]:checked {
+  background: var(--gold);
+  border-color: var(--gold);
+}
+label.cal-check input[type="checkbox"]:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
