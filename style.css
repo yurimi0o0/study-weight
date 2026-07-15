@@ -200,6 +200,20 @@ input, select, textarea {
   font-family: inherit;
   transition: border-color 0.15s ease;
   min-width: 0;
+  display: block;
+}
+select { overflow: hidden; text-overflow: ellipsis; }
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value,
+input[type="datetime-local"]::-webkit-date-and-time-value {
+  min-width: 0;
+  text-align: left;
 }
 select { overflow: hidden; text-overflow: ellipsis; }
 input:focus, select:focus, textarea:focus {
@@ -668,6 +682,11 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
     flex-direction: column;
   }
 
+  .row > * {
+    flex-basis: auto;
+    width: 100%;
+  }
+
   .row > .btn,
   .row > button,
   .row > .link-btn {
@@ -683,7 +702,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
   }
 
   .row-2 input {
-    font-size: 0.88rem;
+    font-size: 16px;
     padding-left: 7px;
     padding-right: 7px;
   }
@@ -696,6 +715,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
     flex: 1 1 100%;
     flex-direction: row;
     gap: 6px;
+    width: 100%;
   }
 
   .list-item > .row > .btn,
@@ -723,6 +743,14 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
   .cal-cell {
     min-height: 42px;
     border-radius: 9px;
+  }
+
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"] {
+    font-size: 16px;
+    padding-left: 9px;
+    padding-right: 9px;
   }
 
   .bottom-nav button {
