@@ -39,6 +39,20 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+
+async function withSelfStudyScript(response) {
+  const type = response.headers.get('content-type') || '';
+  if (!type.includes('text/html')) return response;
+  const html = await response.text();
+  const script = '<script type="module" src="./self-study.js?v=20260715a"></script>';
+  if (html.includes('self-study.js')) return new Response(html, response);
+  return new Response(html.replace('</body>', `${script}</body>`), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers
+  });
+}
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const req = event.request;
@@ -57,8 +71,8 @@ self.addEventListener('fetch', (event) => {
       .then((res) => {
         const cloned = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(req, cloned));
-        return res;
+        return req.destination === 'document' ? withSelfStudyScript(res) : res;
       })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+      .catch(() => caches.match(req).then((cached) => cached ? (req.destination === 'document' ? withSelfStudyScript(cached) : cached) : caches.match('./index.html').then((fallback) => fallback ? withSelfStudyScript(fallback) : fallback)))
   );
 });
