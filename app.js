@@ -80,6 +80,7 @@ async function loadAll(){
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
   state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
+  state.selfStudyDays=(await getDocs(userCol('selfStudyDays'))).docs.map(d=>({id:d.id,...d.data()}));
 }
 
 function aggregate(){
@@ -234,6 +235,8 @@ $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number
 $('#calNext').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
 $('#calToday').onclick=()=>{state.calendarMonth=logicalDateStr().slice(0,7); state.selectedDate=null; renderGoals();};
 document.querySelectorAll('.cal-cell[data-date]').forEach(c=>c.onclick=()=>{state.selectedDate=c.dataset.date; renderGoals();});
+markSelfStudyCalendarCells();
+injectSelfStudyCalendarCheck();
 }
 function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
@@ -242,6 +245,39 @@ function renderCalendarCard(){
   const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
   return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
 }
+
+function getSelfStudyDay(date){ return (state.selfStudyDays||[]).find(d=>d.id===date || d.date===date); }
+function isSelfStudyDone(date){ return !!getSelfStudyDay(date)?.done; }
+function markSelfStudyCalendarCells(){
+  document.querySelectorAll('.cal-cell[data-date]').forEach(cell=>{
+    const done=isSelfStudyDone(cell.dataset.date);
+    cell.classList.toggle('self-study-done', done);
+    if(done){
+      const marker=cell.querySelector('small');
+      if(marker) marker.textContent='室';
+    }
+  });
+}
+function injectSelfStudyCalendarCheck(){
+  const wrap=$('#calDayRecords');
+  const date=state.selectedDate;
+  if(!wrap || !date) return;
+  wrap.insertAdjacentHTML('afterbegin', `<div class='cal-check-card'><label class='list-item cal-check'><input type='checkbox' class='selfStudyCheck' data-date='${date}' ${isSelfStudyDone(date)?'checked':''}/><span>自習室に行った</span></label></div>`);
+  wrap.querySelector('.selfStudyCheck').onchange=async(e)=>{
+    try{ await toggleSelfStudyDay(e.target.dataset.date); renderGoals(); }
+    catch(err){ console.error(err); alert('自習室チェックの保存に失敗しました。通信環境をご確認ください。'); }
+  };
+}
+async function toggleSelfStudyDay(date){
+  const existing=getSelfStudyDay(date);
+  const done=!existing?.done;
+  const data={date, done, updatedAt:new Date().toISOString()};
+  if(!existing) data.createdAt=data.updatedAt;
+  await setDoc(doc(db, `users/${state.uid}/selfStudyDays/${date}`), data, {merge:true});
+  if(existing) existing.done=done;
+  else { if(!state.selfStudyDays) state.selfStudyDays=[]; state.selfStudyDays.push({id:date,...data}); }
+}
+
 function renderCalendarDayRecords(dayInfo,date){
   if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`;
   if(!dayInfo) return `<h4>${date}</h4><div class='small'>この日の学習記録はありません。</div>`;
