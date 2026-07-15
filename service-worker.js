@@ -1,21 +1,3 @@
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
-
-firebase.initializeApp({
-  apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ',
-  authDomain: 'study-weight.firebaseapp.com',
-  projectId: 'study-weight',
-  storageBucket: 'study-weight.firebasestorage.app',
-  messagingSenderId: '850012109401',
-  appId: '1:850012109401:web:6ba78214593f87c7054f48'
-});
-const messaging = firebase.messaging();
-messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || payload.data?.title || 'Study Density Log';
-  const body = payload.notification?.body || payload.data?.body || '今日のタスクを確認しましょう。';
-  self.registration.showNotification(title, { body, tag: payload.data?.tag || 'sdl-fcm' });
-});
-
 const CACHE_NAME = 'study-density-log-v5';
 const APP_SHELL = ['./', './index.html', './manifest.json'];
 
