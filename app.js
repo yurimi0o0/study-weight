@@ -646,13 +646,20 @@ async function refresh(){
 }
 
 $('#appTitle').textContent = APP_NAME;
+let loginInFlight=false;
 $('#loginBtn').onclick=async()=>{
+  if(loginInFlight) return; // 連打でsignInWithPopupが二重発火しauth/cancelled-popup-requestになるのを防ぐ
+  loginInFlight=true;
+  $('#loginBtn').disabled=true;
   try {
     const result = await signInWithPopup(auth,new GoogleAuthProvider());
     console.log('Login success:', result.user?.email);
   } catch (error) {
     console.error('Login failed:', error.code, error.message);
-    alert(`ログイン失敗: ${error.code} / ${error.message}`);
+    if(error.code!=='auth/cancelled-popup-request') alert(`ログイン失敗: ${error.code} / ${error.message}`);
+  } finally {
+    loginInFlight=false;
+    $('#loginBtn').disabled=false;
   }
 };
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
