@@ -99,7 +99,8 @@ async function renderDashboard(){
   const max=Math.max(1,...bars);
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
   const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
-  $('#dashboard').innerHTML=`${renderScheduleStreakCard()}
+  $('#dashboard').innerHTML=`${nowDateTimeHtml()}
+  ${renderScheduleStreakCard()}
   ${tasksCardHtml()}
   ${taskMemoHtml()}
   <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
@@ -114,6 +115,7 @@ async function renderDashboard(){
   </details>`;
   bindScheduleChecks();
   bindTaskMemo();
+  startDashboardClock();
 }
 function renderMaterialTotalsCard(){
   const map = new Map();
@@ -282,12 +284,21 @@ function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date
 function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=state.schedule.defaultTasks||[]; return p ? [...base, ...(p.tasks||[])] : base; }
 const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
 function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id]) && dailyMinutesFor(d.date)>=20); }
+function tasksListEqual(a,b){ return a.length===b.length && a.every((t,i)=>b[i] && b[i].id===t.id && b[i].text===t.text); }
 async function ensureScheduleDay(date){
   const existing=getScheduleDay(date);
   if(existing){
-    // 空のままスナップショットされた日（期間作成直後など）は、タスクが後から登録されたら反映する
     const eff=effectiveTasksFor(date);
-    if((existing.tasks||[]).length===0 && eff.length>0){
+    if(date===logicalDateStr()){
+      // 今日の分は、タスク一覧の追加・削除・変更をその日のスナップショットにも常に反映する（過去日は履歴として固定のまま変更しない）
+      if(!tasksListEqual(existing.tasks||[], eff)){
+        const prevDone=existing.done||{};
+        existing.tasks=eff.map(t=>({...t}));
+        existing.done=Object.fromEntries(eff.filter(t=>prevDone[t.id]).map(t=>[t.id,true]));
+        await setDoc(scheduleDayDoc(date), {...existing, updatedAt:new Date().toISOString()}, {merge:true});
+      }
+    } else if((existing.tasks||[]).length===0 && eff.length>0){
+      // 空のままスナップショットされた過去日（期間作成直後など）は、タスクが後から登録されたら反映する
       existing.tasks=eff.map(t=>({...t}));
       await setDoc(scheduleDayDoc(date), {...existing, updatedAt:new Date().toISOString()}, {merge:true});
     }
@@ -462,6 +473,23 @@ function bindScheduleSettings(){
     await refresh();
   });
 }
+function formatNowDateTime(){
+  const now=new Date();
+  const weekday=['日','月','火','水','木','金','土'][now.getDay()];
+  return `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日(${weekday}) ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+}
+function nowDateTimeHtml(){
+  return `<div class='card small' style='text-align:center'><span id='nowClock'>${formatNowDateTime()}</span><div class='small' style='margin-top:4px'>学習記録上の「1日」は深夜4:00で区切られます</div></div>`;
+}
+let clockInterval=null;
+function startDashboardClock(){
+  if(clockInterval) clearInterval(clockInterval);
+  clockInterval=setInterval(()=>{
+    const el=$('#nowClock');
+    if(!el){ clearInterval(clockInterval); clockInterval=null; return; }
+    el.textContent=formatNowDateTime();
+  }, 15000);
+}
 function renderScheduleStreakCard(){
   if(!state.schedule?.startDate) return '';
   const s=computeScheduleStreak();
@@ -622,10 +650,14 @@ $('#loginBtn').onclick=async()=>{
   }
 };
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
+let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
-  state.uid=user.uid; state.userName=user.displayName||''; state.userEmail=user.email||''; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
+  if(!user){ lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
+  state.userName=user.displayName||''; state.userEmail=user.email||'';
+  if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
+  lastAuthUid=user.uid;
+  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
   await ensureSeedData(); await refresh(); switchScreen('dashboard');
 });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
