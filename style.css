@@ -222,6 +222,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 textarea { min-height: 72px; resize: vertical; }
+#taskMemoInput { min-height: 150px; }
 label {
   display: block;
   font-size: 0.78rem;
