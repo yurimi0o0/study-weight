@@ -552,7 +552,38 @@ $('#openNotify').onclick=()=>{
 };
 $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
-document.addEventListener('click', async(e)=>{ if(e.target?.id==='exp'){const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();} if(e.target?.id==='imp'){const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();} if(e.target?.id==='wipe'){if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}} , {once:true}); }
+bindSettingsPanelActions(); }
+
+let settingsPanelActionsBound = false;
+function bindSettingsPanelActions(){
+  if(settingsPanelActionsBound) return;
+  settingsPanelActionsBound = true;
+  document.addEventListener('click', async(e)=>{
+    if(e.target?.id==='exp'){
+      const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}};
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=`study-density-backup-${todayStr()}.json`;
+      a.click();
+    }
+    if(e.target?.id==='imp'){
+      const f=$('#impFile').files[0]; if(!f) return;
+      const j=JSON.parse(await f.text());
+      for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item);
+      if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true});
+      await refresh();
+    }
+    if(e.target?.id==='wipe'){
+      if(!confirm('全削除します')) return;
+      for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){
+        const docs=(await getDocs(userCol(key))).docs;
+        for(const d of docs) await deleteDoc(d.ref);
+      }
+      await refresh();
+    }
+  });
+}
 
 function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
 async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
