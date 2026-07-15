@@ -1,0 +1,25 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, work]
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JavaScript syntax check
+        run: node --check app.js
+      - name: Verify required static assets
+        run: |
+          test -f index.html
+          test -f app.js
+          test -f style.css
+          test -f manifest.json
+          test -f service-worker.js
+          test -f firestore.rules

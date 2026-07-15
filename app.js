@@ -25,17 +25,25 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
+const state = { uid: null, subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [], selfStudyDays: [] };
 
 const $ = s => document.querySelector(s);
-const todayStr = () => new Date().toISOString().slice(0,10);
+const dateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseDate = (dateStrValue) => { const [y,m,d] = String(dateStrValue).split('-').map(Number); return new Date(y, (m||1)-1, d||1); };
+const todayStr = () => dateStr(new Date());
 const logicalNow = () => { const n=new Date(); if(n.getHours()<4) n.setDate(n.getDate()-1); return n; };
-const logicalDateStr = () => logicalNow().toISOString().slice(0,10);
+const logicalDateStr = () => dateStr(logicalNow());
 const nowTime = () => new Date().toTimeString().slice(0,5);
-const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x.toISOString().slice(0,10); };
+const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return dateStr(x); };
 const minFromTime = t => t ? (+t.slice(0,2))*60 + (+t.slice(3,5)) : null;
 const calcMinutesByTime = (s,e)=> (s&&e) ? Math.max(0, minFromTime(e)-minFromTime(s)) : null;
 const focusMinutes = r => Math.round((Number(r.minutes)||0) * (state.quality[r.quality] ?? 1));
+
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+const attr = escapeHtml;
+
 function normalizeDateInput(input){
   const m = String(input || '').trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
   if(!m) return null;
@@ -66,6 +74,7 @@ async function loadAll(){
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
   state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
+  state.selfStudyDays=(await getDocs(userCol('selfStudyDays'))).docs.map(d=>({id:d.id,...d.data()}));
 }
 
 function aggregate(){
@@ -78,8 +87,8 @@ const fmtHHMM = m => { const t=Math.min(1439,Math.max(0,Math.round(m||0))); retu
 
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
-  const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
-  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
+  const days=next?Math.ceil((parseDate(next.date)-parseDate(baseDate))/86400000):null;
+  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(logicalNow()); d.setDate(d.getDate()-(6-i)); return dateStr(d);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
@@ -89,7 +98,7 @@ async function renderDashboard(){
   ${todayTasksHtml()}
   <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
-  ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${next.name}（あと${days}日）</div>`:''}</div>
+  ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${escapeHtml(next.name)}（あと${days}日）</div>`:''}</div>
   <div class='card'><h3>直近7日</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
   <details class='fold'><summary>詳しい内訳（教科・教材・ラベル・質）</summary>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
@@ -108,11 +117,11 @@ function renderMaterialTotalsCard(){
     map.set(key,item);
   });
   const rows=[...map.values()].sort((a,b)=>b.minutes-a.minutes);
-  return `<div class='card'><h3>教材別累計</h3>${rows.map(v=>{const m=state.materials.find(x=>x.id===v.materialId); const materialName=m?.name||'教材未選択'; const sid=m?.subjectId||v.subjectId; const sname=subjectName(sid); return `<div class='list-item'><div><b>${materialName}</b> / ${sname}</div><div class='small'>合計 ${fmtH(v.minutes)}・集中 ${fmtH(v.focus)}・${v.count}回</div><div class='small'>ページ ${v.pages} / 問題 ${v.problems}</div></div>`;}).join('')||'<div class=\"small\">データなし</div>'}</div>`;
+  return `<div class='card'><h3>教材別累計</h3>${rows.map(v=>{const m=state.materials.find(x=>x.id===v.materialId); const materialName=m?.name||'教材未選択'; const sid=m?.subjectId||v.subjectId; const sname=subjectName(sid); return `<div class='list-item'><div><b>${escapeHtml(materialName)}</b> / ${escapeHtml(sname)}</div><div class='small'>合計 ${fmtH(v.minutes)}・集中 ${fmtH(v.focus)}・${v.count}回</div><div class='small'>ページ ${v.pages} / 問題 ${v.problems}</div></div>`;}).join('')||'<div class=\"small\">データなし</div>'}</div>`;
 }
 function renderBreakdownCard(title,pairs){
   const rows=pairs.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]); const total=rows.reduce((s,[,v])=>s+v,0)||1;
-  return `<div class='card'><h3>${title}</h3>${rows.map(([k,v])=>`<div class='legend-row'><span>${k}</span><span>${fmtH(v)} (${Math.round(v/total*100)}%)</span></div>`).join('')||'<div class="small">データなし</div>'}</div>`;
+  return `<div class='card'><h3>${title}</h3>${rows.map(([k,v])=>`<div class='legend-row'><span>${escapeHtml(k)}</span><span>${fmtH(v)} (${Math.round(v/total*100)}%)</span></div>`).join('')||'<div class="small">データなし</div>'}</div>`;
 }
 
 function renderRecordForm(edit=null){
@@ -122,13 +131,13 @@ function renderRecordForm(edit=null){
     <h3>${edit?'記録編集':'記録追加'}</h3>
     <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='sw-actions'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
     <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
-    <label>メモ</label><textarea id='fMemo'>${r.memo||''}</textarea>
+    <label>メモ</label><textarea id='fMemo'>${escapeHtml(r.memo||'')}</textarea>
     <div class='row-2'><div><label>日付</label><input id='fDate' type='date' value='${r.date}' /></div><div><label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' /></div></div>
     <div class='row-2'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
-    <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
+    <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
     <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
-    <label>ラベル(複数)</label><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' data-id='${l.id}'>${l.name}</button>`).join('')}</div>
+    <label>ラベル(複数)</label><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' data-id='${l.id}'>${escapeHtml(l.name)}</button>`).join('')}</div>
     <div class='row'><div><label>ページ数</label><input id='fPages' type='number' value='${r.pages||''}' /></div><div><label>問題数</label><input id='fProblems' type='number' value='${r.problems||''}' /></div></div>
     <div class='row'><button id='saveRecord' class='btn primary'>保存</button>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}</div>
   </div>`;
@@ -137,7 +146,7 @@ function renderRecordForm(edit=null){
   const fillMaterials=(preferred='')=>{
     const sid=$('#fSubject').value;
     const opts=state.materials.filter(m=>!m.subjectId || m.subjectId===sid);
-    $('#fMaterial').innerHTML=`<option value=''>未選択</option>`+opts.map(m=>`<option value='${m.id}'>${m.name}</option>`).join('');
+    $('#fMaterial').innerHTML=`<option value=''>未選択</option>`+opts.map(m=>`<option value='${m.id}'>${escapeHtml(m.name)}</option>`).join('');
     $('#fMaterial').value = opts.some(m=>m.id===preferred) ? preferred : '';
   };
   fillMaterials(r.materialId);
@@ -161,13 +170,13 @@ function renderRecordForm(edit=null){
 }
 
 function renderList(){
-  $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${l.name}</option>`)}</select></div></div></details><div id='recordsWrap'></div>`;
+  $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`)}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`)}</select></div></div></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
     const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
     $('#recordsWrap').innerHTML=rows.map(r=>`<div class='tl-item'>
-      <div class='tl-head'><span class='tl-title'>${subjectName(r.subjectId)}${materialName(r.materialId)?` <span class='tl-material'>${materialName(r.materialId)}</span>`:''}</span><span class='tl-time'>${r.date.slice(5).replace('-','/')} ${r.startTime||''}${r.startTime||r.endTime?'–':''}${r.endTime||''}</span></div>
-      <div class='tl-meta'>${fmtH(r.minutes)}・集中${fmtH(focusMinutes(r))}・質${r.quality}${(r.labelIds||[]).map(id=>` <span class='tag'>${labelName(id)}</span>`).join('')}</div>
-      ${r.memo?`<div class='tl-memo'>${r.memo}</div>`:''}
+      <div class='tl-head'><span class='tl-title'>${escapeHtml(subjectName(r.subjectId))}${materialName(r.materialId)?` <span class='tl-material'>${escapeHtml(materialName(r.materialId))}</span>`:''}</span><span class='tl-time'>${r.date.slice(5).replace('-','/')} ${r.startTime||''}${r.startTime||r.endTime?'–':''}${r.endTime||''}</span></div>
+      <div class='tl-meta'>${fmtH(r.minutes)}・集中${fmtH(focusMinutes(r))}・質${r.quality}${(r.labelIds||[]).map(id=>` <span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
+      ${r.memo?`<div class='tl-memo'>${escapeHtml(r.memo)}</div>`:''}
       <div class='tl-actions'><button class='link-btn edit' data-id='${r.id}'>編集</button><button class='link-btn danger del' data-id='${r.id}'>削除</button></div>
     </div>`).join('')||'<div class="card small">まだ記録がありません</div>';
     document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
@@ -179,7 +188,7 @@ const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
 function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${s.name}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${i.name}${hasSubject?`<span class='small'>　${subjectName(i.subjectId)}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button>${hasSubject?`<button class='btn small editm' data-id='${i.id}'>編集</button>`:''}<button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`)}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${escapeHtml(i.name)}${hasSubject?`<span class='small'>　${escapeHtml(subjectName(i.subjectId))}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button>${hasSubject?`<button class='btn small editm' data-id='${i.id}'>編集</button>`:''}<button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
 function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
   document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
@@ -188,8 +197,8 @@ function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=a
     const m=state.materials.find(x=>x.id===b.dataset.id); if(!m) return;
     const rowEl=b.closest('.list-item');
     rowEl.innerHTML=`<div class='col' style='flex:1'>
-      <input class='edit-name' value='${(m.name||'').replace(/'/g,'&#39;')}' placeholder='教材名'/>
-      <select class='edit-subject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===m.subjectId?'selected':''}>${s.name}</option>`).join('')}</select>
+      <input class='edit-name' value='${attr(m.name||'')}' placeholder='教材名'/>
+      <select class='edit-subject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===m.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
       <div class='row'><button class='btn small primary save-edit'>保存</button><button class='btn small cancel-edit'>キャンセル</button></div>
     </div>`;
     rowEl.querySelector('.save-edit').onclick=async()=>{
@@ -207,13 +216,14 @@ $('#goals').innerHTML=`
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>${fmtH(a.week)} / 目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:`<div class='small'>週目標が未設定です。下の「設定」から登録できます。</div>`}
 </div>
 ${renderCalendarCard()}
-${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${t.name}</span><span><b>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
+${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${escapeHtml(t.name)}</span><span><b>あと${Math.max(0,Math.ceil((parseDate(t.date)-parseDate(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
 <details class='fold'><summary>設定（週目標・テスト・タスク・期間）</summary>
   <div class='card'><h4>今週の目標時間</h4><input id='goalDuration' type='time' value='${fmtHHMM(state.weekGoal||0)}'/><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
-  <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${t.name} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
+  <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${escapeHtml(t.name)} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
+bindCalendarSelfStudyChecks();
 $('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{await addDoc(userCol('tests'),{name:$('#testName').value,date:$('#testDate').value,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
@@ -224,15 +234,45 @@ document.querySelectorAll('.cal-cell[data-date]').forEach(c=>c.onclick=()=>{stat
 }
 function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
+  const selfStudyMap=Object.fromEntries((state.selfStudyDays||[]).map(d=>[d.id, !!d.done]));
   const dayMap={}; state.records.forEach(r=>{if(!r.date?.startsWith(state.calendarMonth)) return; dayMap[r.date]=(dayMap[r.date]||{minutes:0,focus:0,records:[]}); dayMap[r.date].minutes+=(+r.minutes||0); dayMap[r.date].focus+=focusMinutes(r); dayMap[r.date].records.push(r);});
   const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
-  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
-  return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
+  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=selfStudyMap[date]?'室':(lv===1?'•':lv===2?'✓':''); const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${selfStudyMap[date]?'self-study-done':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
+  return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarSelfStudyCheck(state.selectedDate)}${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
 }
+
+function getSelfStudyDay(date){ return state.selfStudyDays.find(d=>d.id===date); }
+function renderCalendarSelfStudyCheck(date){
+  if(!date) return '';
+  const done=!!getSelfStudyDay(date)?.done;
+  return `<div class='cal-check-card'><label class='list-item cal-check'><input type='checkbox' class='selfStudyCheck' data-date='${date}' ${done?'checked':''}/><span>自習室に行った</span></label></div>`;
+}
+async function toggleSelfStudyDay(date){
+  if(!date) return;
+  const existing=getSelfStudyDay(date);
+  const done=!existing?.done;
+  const data={date, done, updatedAt:new Date().toISOString()};
+  if(!existing) data.createdAt=data.updatedAt;
+  await setDoc(doc(db, `users/${state.uid}/selfStudyDays/${date}`), data, {merge:true});
+  if(existing) existing.done=done;
+  else state.selfStudyDays.push({id:date,...data});
+}
+function bindCalendarSelfStudyChecks(){
+  document.querySelectorAll('.selfStudyCheck').forEach(cb=>cb.onchange=async()=>{
+    try{
+      await toggleSelfStudyDay(cb.dataset.date);
+      renderGoals();
+    }catch(err){
+      console.error(err);
+      alert('自習室チェックの保存に失敗しました。通信環境をご確認ください。');
+    }
+  });
+}
+
 function renderCalendarDayRecords(dayInfo,date){
   if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`;
   if(!dayInfo) return `<h4>${date}</h4><div class='small'>この日の学習記録はありません。</div>`;
-  return `<h4>${date}</h4><div class='small' style='margin-bottom:6px'>合計 ${fmtH(dayInfo.minutes)}・集中 ${fmtH(dayInfo.focus)}</div>${dayInfo.records.map(r=>`<div class='list-item'>${subjectName(r.subjectId)} / ${materialName(r.materialId)||'教材未選択'} / ${r.minutes}分 / 質${r.quality}<div class='small'>${r.memo||''}</div></div>`).join('')}`;
+  return `<h4>${date}</h4><div class='small' style='margin-bottom:6px'>合計 ${fmtH(dayInfo.minutes)}・集中 ${fmtH(dayInfo.focus)}</div>${dayInfo.records.map(r=>`<div class='list-item'>${escapeHtml(subjectName(r.subjectId))} / ${escapeHtml(materialName(r.materialId)||'教材未選択')} / ${r.minutes}分 / 質${escapeHtml(r.quality)}<div class='small'>${escapeHtml(r.memo||'')}</div></div>`).join('')}`;
 }
 function renderCalendarDayTasks(date){
   if(!date || !state.schedule?.startDate || date<state.schedule.startDate) return '';
@@ -240,13 +280,13 @@ function renderCalendarDayTasks(date){
   const tasks=d?d.tasks:effectiveTasksFor(date);
   if(!tasks.length) return '';
   const done=d?(d.done||{}):{};
-  return `<h4 style='margin-top:12px'>${date} のタスク</h4>${tasks.map(t=>`<div class='legend-row'><span>${done[t.id]?'✓':'・'} ${t.text}</span></div>`).join('')}`;
+  return `<h4 style='margin-top:12px'>${date} のタスク</h4>${tasks.map(t=>`<div class='legend-row'><span>${done[t.id]?'✓':'・'} ${escapeHtml(t.text)}</span></div>`).join('')}`;
 }
 
 // ---- スケジュール（通年ベース + 季節ごとの期間上書き） ----
 function scheduleDayDoc(date){ return doc(db, `users/${state.uid}/scheduleDays/${date}`); }
 function getScheduleDay(date){ return state.scheduleDays.find(d=>d.id===date); }
-function addDays(dateStr,n){ const d=new Date(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function addDays(dateStrValue,n){ const d=parseDate(dateStrValue); d.setDate(d.getDate()+n); return dateStr(d); }
 function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date>=p.startDate && date<=p.endDate); }
 function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=state.schedule.defaultTasks||[]; return p ? [...base, ...(p.tasks||[])] : base; }
 const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
@@ -297,7 +337,7 @@ function computeScheduleStreak(){
 function carryoverHtml(){
   const carry=scheduleCarryover();
   if(!carry.length) return '';
-  return `<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${t.text}</span></label>`).join('')}</div>`;
+  return `<div class='card'><h3 class='carry-title'>繰り越し（${carry[0].date}分・未完了）</h3>${carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}'/><span>${escapeHtml(t.text)}</span></label>`).join('')}</div>`;
 }
 function todayTasksHtml(){
   if(!state.schedule?.startDate) return '';
@@ -308,11 +348,11 @@ function todayTasksHtml(){
   const doneCount=tasks.filter(t=>done[t.id]).length;
   const activePeriod=findActivePeriod(today);
   const emptyMsg=activePeriod
-    ?`「${activePeriod.name}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
+    ?`「${escapeHtml(activePeriod.name)}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
     :'タスクが未登録です。目標タブ下部の設定から追加してください。';
   return `<div class='card'>
-    <h3>今日のタスク <span class='small'>${activePeriod?`${activePeriod.name}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
-    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${t.text}</span></label>`).join('')}
+    <h3>今日のタスク <span class='small'>${activePeriod?`${escapeHtml(activePeriod.name)}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
+    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('')}
   </div>`;
 }
 function bindScheduleChecks(){
@@ -328,10 +368,10 @@ function bindScheduleChecks(){
 }
 function periodManagerHtml(p){
   return `<div class='card'>
-    <div class='row'><b>${p.name}</b><button class='link-btn danger delPeriod' data-id='${p.id}'>期間を削除</button></div>
+    <div class='row'><b>${escapeHtml(p.name)}</b><button class='link-btn danger delPeriod' data-id='${p.id}'>期間を削除</button></div>
     <div class='small'>${p.startDate} 〜 ${p.endDate}</div>
     <div class='row'><input id='pNewTask-${p.id}' placeholder='タスク名'/><button class='btn small addPeriodTask' data-id='${p.id}'>追加</button></div>
-    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${t.text}</span><button class='link-btn danger delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
   </div>`;
 }
 function scheduleSettingsHtml(){
@@ -349,7 +389,7 @@ function scheduleSettingsHtml(){
       <h4>毎日のデフォルトタスク</h4>
       <div class='row'><input id='schNewTask' placeholder='タスク名（例: 単語100個）'/><button id='schAddTask' class='btn small'>追加</button></div>
       ${defaultTasks.length===0?`<button id='schUseTemplate' class='btn small'>例テンプレートを使う</button>`:''}
-      ${defaultTasks.map(t=>`<div class='list-item'><span>${t.text}</span><button class='link-btn danger delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
+      ${defaultTasks.map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
     </div>
     <div class='card'>
       <h4>期間（季節ごとの上書き）</h4>
@@ -451,7 +491,31 @@ $('#openNotify').onclick=()=>{
 };
 $('#settingsLogout').onclick=()=>signOut(auth);
 $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
-document.addEventListener('click', async(e)=>{ if(e.target?.id==='exp'){const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,settings:{quality:state.quality}}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();} if(e.target?.id==='imp'){const f=$('#impFile').files[0]; if(!f) return; const j=JSON.parse(await f.text()); for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item); if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true}); await refresh();} if(e.target?.id==='wipe'){if(!confirm('全削除します')) return; for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);} await refresh();}} , {once:true}); }
+}
+
+
+document.addEventListener('click', async(e)=>{
+  if(e.target?.id==='exp'){
+    const data={subjects:state.subjects,materials:state.materials,labels:state.labels,studyRecords:state.records,tests:state.tests,selfStudyDays:state.selfStudyDays,settings:{quality:state.quality}};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`study-density-backup-${todayStr()}.json`; a.click();
+  }
+  if(e.target?.id==='imp'){
+    const f=$('#impFile')?.files?.[0]; if(!f) return;
+    try{
+      const j=JSON.parse(await f.text());
+      for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item);
+      for(const item of (j.selfStudyDays||[])){ const date=item.date||item.id; if(date) await setDoc(doc(db,`users/${state.uid}/selfStudyDays/${date}`), {...item,date}, {merge:true}); }
+      if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true});
+      await refresh();
+    }catch(err){ console.error(err); alert('インポートに失敗しました。JSONファイルの内容を確認してください。'); }
+  }
+  if(e.target?.id==='wipe'){
+    if(!confirm('全削除します')) return;
+    for(const key of ['subjects','materials','labels','studyRecords','tests','weeklyGoals','selfStudyDays']){const docs=(await getDocs(userCol(key))).docs; for(const d of docs) await deleteDoc(d.ref);}
+    await refresh();
+  }
+});
 
 function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
 async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
@@ -476,7 +540,7 @@ onAuthStateChanged(auth, async user=>{
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker
-    .register('/study-weight/service-worker.js')
+    .register('./service-worker.js')
     .then((reg) => {
       console.log('Service worker registered');
 
