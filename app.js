@@ -637,7 +637,13 @@ function bindSettingsPanelActions(){
 }
 
 function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){ await loadAll(); ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); }); maybeNotifyToday(); }
+async function refresh(){
+  await loadAll();
+  const today=logicalDateStr();
+  if(state.schedule?.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today); // タスク編集直後でも、表示中の画面に関わらず今日の分を再同期する
+  ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); });
+  maybeNotifyToday();
+}
 
 $('#appTitle').textContent = APP_NAME;
 $('#loginBtn').onclick=async()=>{
