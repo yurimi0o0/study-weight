@@ -33,7 +33,7 @@ const functions = getFunctions(app);
 let messaging = null; // 未対応ブラウザでgetMessaging(app)が例外を投げるため遅延初期化
 let swReg = null;      // Service Worker登録（getTokenに渡す）
 let currentFcmToken = null;
-const state = { uid: null, userName: '', userEmail: '', subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
+const state = { uid: null, userName: '', userEmail: '', subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, taskMemo: '', weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
 
 const $ = s => document.querySelector(s);
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -76,7 +76,7 @@ async function loadAll(){
   state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
   const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf())?.targetMinutes)||0;
-  const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY };
+  const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
   state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
@@ -101,6 +101,7 @@ async function renderDashboard(){
   const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
   $('#dashboard').innerHTML=`${renderScheduleStreakCard()}
   ${tasksCardHtml()}
+  ${taskMemoHtml()}
   <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
   ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${escapeHtml(next.name)}（あと${days}日）</div>`:''}</div>
@@ -112,6 +113,7 @@ async function renderDashboard(){
   ${renderBreakdownCard('質別', ['S','A','B','C','D'].map(q=>[q,state.records.filter(r=>r.quality===q).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   </details>`;
   bindScheduleChecks();
+  bindTaskMemo();
 }
 function renderMaterialTotalsCard(){
   const map = new Map();
@@ -349,6 +351,17 @@ function tasksCardHtml(){
     ${carryRows}
     ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:todayRows}
   </div>`;
+}
+function taskMemoHtml(){
+  return `<div class='card'><h4>タスクメモ</h4><textarea id='taskMemoInput' placeholder='自由にメモを書けます'>${escapeHtml(state.taskMemo||'')}</textarea><button id='saveTaskMemo' class='btn small' style='margin-top:8px'>保存</button></div>`;
+}
+function bindTaskMemo(){
+  $('#saveTaskMemo').onclick=async()=>{
+    const taskMemo=$('#taskMemoInput').value;
+    await setDoc(doc(db,`users/${state.uid}/settings/main`),{taskMemo},{merge:true});
+    state.taskMemo=taskMemo;
+    alert('保存しました');
+  };
 }
 function bindScheduleChecks(){
   document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
