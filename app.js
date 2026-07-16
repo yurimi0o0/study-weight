@@ -36,11 +36,14 @@ let currentFcmToken = null;
 const state = { uid: null, userName: '', userEmail: '', subjects: [], materials: [], labels: [], records: [], tests: [], quality: { ...DEFAULT_QUALITY }, taskMemo: '', weekGoal: 0, calendarMonth: null, selectedDate: null, schedule: { startDate: '', defaultTasks: [] }, schedulePeriods: [], scheduleDays: [] };
 
 const $ = s => document.querySelector(s);
-const todayStr = () => new Date().toISOString().slice(0,10);
+// toISOString()はUTCに変換するため、JST(UTC+9)では深夜0時〜9時台に日付が1日ずれる。カレンダー日付は必ずローカル値から組み立てる
+const toDateStr = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseDateStr = dateStr => { const [y,m,d]=dateStr.split('-').map(Number); return new Date(y,m-1,d); };
+const todayStr = () => toDateStr(new Date());
 const logicalNow = () => { const n=new Date(); if(n.getHours()<4) n.setDate(n.getDate()-1); return n; };
-const logicalDateStr = () => logicalNow().toISOString().slice(0,10);
+const logicalDateStr = () => toDateStr(logicalNow());
 const nowTime = () => new Date().toTimeString().slice(0,5);
-const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x.toISOString().slice(0,10); };
+const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return toDateStr(x); };
 const minFromTime = t => t ? (+t.slice(0,2))*60 + (+t.slice(3,5)) : null;
 const calcMinutesByTime = (s,e)=> (s&&e) ? Math.max(0, minFromTime(e)-minFromTime(s)) : null;
 const focusMinutes = r => Math.round((Number(r.minutes)||0) * (state.quality[r.quality] ?? 1));
@@ -94,7 +97,7 @@ const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${S
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
   const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
-  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);});
+  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
@@ -279,7 +282,7 @@ function renderCalendarDayTasks(date){
 // ---- スケジュール（通年ベース + 季節ごとの期間上書き） ----
 function scheduleDayDoc(date){ return doc(db, `users/${state.uid}/scheduleDays/${date}`); }
 function getScheduleDay(date){ return state.scheduleDays.find(d=>d.id===date); }
-function addDays(dateStr,n){ const d=new Date(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function addDays(dateStr,n){ const d=parseDateStr(dateStr); d.setDate(d.getDate()+n); return toDateStr(d); }
 function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date>=p.startDate && date<=p.endDate); }
 function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=state.schedule.defaultTasks||[]; return p ? [...base, ...(p.tasks||[])] : base; }
 const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
