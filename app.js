@@ -52,6 +52,11 @@ function escapeHtml(value){
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 }
 const attr = escapeHtml;
+function withTimeout(promise, ms=15000){
+  let timer;
+  const timeout=new Promise((_,reject)=>{ timer=setTimeout(()=>reject(new Error('timeout')), ms); });
+  return Promise.race([promise, timeout]).finally(()=>clearTimeout(timer));
+}
 
 function normalizeDateInput(input){
   const m = String(input || '').trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
@@ -674,7 +679,22 @@ onAuthStateChanged(auth, async user=>{
   if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
   lastAuthUid=user.uid;
   state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
-  await ensureSeedData(); await refresh(); switchScreen('dashboard');
+  try {
+    await withTimeout(ensureSeedData());
+    await withTimeout(refresh());
+    switchScreen('dashboard');
+    sessionStorage.removeItem('sdl_auto_reload_attempted');
+  } catch(err) {
+    // iOSでバックグラウンドから復帰した直後など、Firestoreへの通信が固まったまま応答が返らないことがある。
+    // 一度だけ自動リロードして復旧を試みる（無限リロードループ防止のためsessionStorageで1回のみに制限）
+    console.error('初期読み込みがタイムアウトまたは失敗しました:', err);
+    if(!sessionStorage.getItem('sdl_auto_reload_attempted')){
+      sessionStorage.setItem('sdl_auto_reload_attempted', '1');
+      location.reload();
+    } else {
+      console.error('再読み込み後も読み込みに失敗しました。通信環境をご確認ください。');
+    }
+  }
 });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && state.uid) maybeNotifyToday(); });
 if ('serviceWorker' in navigator) {
