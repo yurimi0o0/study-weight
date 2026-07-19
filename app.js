@@ -291,7 +291,11 @@ function addDays(dateStr,n){ const d=parseDateStr(dateStr); d.setDate(d.getDate(
 function findActivePeriod(date){ return (state.schedulePeriods||[]).find(p=>date>=p.startDate && date<=p.endDate); }
 function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=state.schedule.defaultTasks||[]; return p ? [...base, ...(p.tasks||[])] : base; }
 const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
-function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id]) && dailyMinutesFor(d.date)>=20); }
+function isDayComplete(d){
+  if(!d || !d.tasks || d.tasks.length===0 || !d.tasks.every(t=>d.done?.[t.id])) return false;
+  if(dailyMinutesFor(d.date)>=20) return true;
+  return dailyMinutesFor(addDays(d.date,1))>=60; // 当日20分に満たなくても、翌日に1時間以上学習していれば繰り越し完了分として達成扱いにする
+}
 function tasksListEqual(a,b){ return a.length===b.length && a.every((t,i)=>b[i] && b[i].id===t.id && b[i].text===t.text); }
 function computeCarryoverIds(date){
   const yesterday=addDays(date,-1);
