@@ -293,27 +293,43 @@ function effectiveTasksFor(date){ const p=findActivePeriod(date); const base=sta
 const dailyMinutesFor = date => state.records.filter(r=>r.date===date).reduce((s,r)=>s+(+r.minutes||0),0);
 function isDayComplete(d){ return !!(d && d.tasks && d.tasks.length>0 && d.tasks.every(t=>d.done?.[t.id]) && dailyMinutesFor(d.date)>=20); }
 function tasksListEqual(a,b){ return a.length===b.length && a.every((t,i)=>b[i] && b[i].id===t.id && b[i].text===t.text); }
+function computeCarryoverIds(date){
+  const yesterday=addDays(date,-1);
+  if(!state.schedule.startDate || yesterday<state.schedule.startDate) return [];
+  const yd=getScheduleDay(yesterday);
+  const tasks=yd?yd.tasks:effectiveTasksFor(yesterday);
+  const done=yd?(yd.done||{}):{};
+  return tasks.filter(t=>!done[t.id]).map(t=>t.id);
+}
 async function ensureScheduleDay(date){
   const existing=getScheduleDay(date);
+  const isToday=date===logicalDateStr();
   if(existing){
     const eff=effectiveTasksFor(date);
-    if(date===logicalDateStr()){
+    const patch={};
+    if(isToday){
       // 今日の分は、タスク一覧の追加・削除・変更をその日のスナップショットにも常に反映する（過去日は履歴として固定のまま変更しない）
       if(!tasksListEqual(existing.tasks||[], eff)){
         const prevDone=existing.done||{};
         existing.tasks=eff.map(t=>({...t}));
         existing.done=Object.fromEntries(eff.filter(t=>prevDone[t.id]).map(t=>[t.id,true]));
-        await setDoc(scheduleDayDoc(date), {...existing, updatedAt:new Date().toISOString()}, {merge:true});
+        patch.tasks=existing.tasks; patch.done=existing.done;
+      }
+      // 繰り越し表示の対象は今日の間固定する（完了しても日が変わるまで一覧に残す）
+      if(existing.carryoverIds===undefined){
+        existing.carryoverIds=computeCarryoverIds(date);
+        patch.carryoverIds=existing.carryoverIds;
       }
     } else if((existing.tasks||[]).length===0 && eff.length>0){
       // 空のままスナップショットされた過去日（期間作成直後など）は、タスクが後から登録されたら反映する
       existing.tasks=eff.map(t=>({...t}));
-      await setDoc(scheduleDayDoc(date), {...existing, updatedAt:new Date().toISOString()}, {merge:true});
+      patch.tasks=existing.tasks;
     }
+    if(Object.keys(patch).length) await setDoc(scheduleDayDoc(date), {...patch, updatedAt:new Date().toISOString()}, {merge:true});
     return existing;
   }
   if(!state.schedule.startDate || date<state.schedule.startDate) return null;
-  const data={ date, tasks: effectiveTasksFor(date), done:{}, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
+  const data={ date, tasks: effectiveTasksFor(date), done:{}, carryoverIds: isToday?computeCarryoverIds(date):[], createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
   await setDoc(scheduleDayDoc(date), data);
   const entry={id:date,...data}; state.scheduleDays.push(entry); return entry;
 }
@@ -329,7 +345,9 @@ function scheduleCarryover(){
   const yd=getScheduleDay(yesterday);
   const tasks=yd?yd.tasks:effectiveTasksFor(yesterday);
   const done=yd?(yd.done||{}):{};
-  return tasks.filter(t=>!done[t.id]).map(t=>({...t,date:yesterday}));
+  const td=getScheduleDay(today);
+  const ids=td?.carryoverIds ?? tasks.filter(t=>!done[t.id]).map(t=>t.id); // 今日の分がまだ無ければその場で計算
+  return tasks.filter(t=>ids.includes(t.id)).map(t=>({...t,date:yesterday,done:!!done[t.id]}));
 }
 function computeScheduleStreak(){
   const {startDate}=state.schedule||{};
@@ -344,13 +362,10 @@ function computeScheduleStreak(){
   });
   return { current:running, broken:(running===0 && lastBreakLen>0)?{length:lastBreakLen,date:brokenOn}:null };
 }
-const pendingCarryoverFade = new Map(); // 繰り越し完了直後、フェード演出のため一時的に表示を維持するタスクのスナップショット
 function tasksCardHtml(){
   if(!state.schedule?.startDate) return '';
   const today=logicalDateStr();
-  const carryLive=scheduleCarryover();
-  const carryExtra=[...pendingCarryoverFade.values()].filter(p=>!carryLive.some(c=>c.id===p.id));
-  const carry=[...carryLive, ...carryExtra];
+  const carry=scheduleCarryover();
   const d=getScheduleDay(today);
   const tasks=d?d.tasks:effectiveTasksFor(today);
   const done=d?(d.done||{}):{};
@@ -359,11 +374,8 @@ function tasksCardHtml(){
   const emptyMsg=activePeriod
     ?`「${escapeHtml(activePeriod.name)}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
     :'タスクが未登録です。目標タブ下部の設定から追加してください。';
-  const carryNote=carryLive.length?`${carryLive[0].date}分の繰り越し${carryLive.length}件 ・ `:'';
-  const carryRows=carry.map(t=>{
-    const pending=pendingCarryoverFade.has(t.id);
-    return `<label class='list-item carry-item${pending?' completing':''}'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${pending?'checked disabled':''}/><span>${escapeHtml(t.text)}</span><span class='tag tag-carry'>繰り越し</span></label>`;
-  }).join('');
+  const carryNote=carry.length?`${carry[0].date}分の繰り越し${carry.length}件 ・ `:'';
+  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''}/><span>${escapeHtml(t.text)}</span><span class='tag tag-carry'>繰り越し</span></label>`).join('');
   const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
   return `<div class='card'>
     <h3>今日のタスク <span class='small'>${carryNote}${activePeriod?`${escapeHtml(activePeriod.name)}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
@@ -384,23 +396,13 @@ function bindTaskMemo(){
 }
 function bindScheduleChecks(){
   document.querySelectorAll('.schTaskCheck,.schCarryCheck').forEach(cb=>cb.onchange=async()=>{
-    const isCarryCheck=cb.classList.contains('schCarryCheck') && cb.checked;
     try{
-      if(isCarryCheck){
-        pendingCarryoverFade.set(cb.dataset.id, {date:cb.dataset.date, id:cb.dataset.id, text:cb.closest('label').querySelector('span').textContent});
-        cb.closest('label').classList.add('completing');
-      }
       await toggleScheduleTask(cb.dataset.date, cb.dataset.id);
     }catch(err){
       console.error(err);
-      pendingCarryoverFade.delete(cb.dataset.id);
       alert('保存に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
     }
-    if(isCarryCheck){
-      setTimeout(()=>{ pendingCarryoverFade.delete(cb.dataset.id); renderDashboard(); }, 450); // 即消えると分かりづらいため一呼吸置く
-    }else{
-      renderDashboard(); // 全データの再取得はせず、更新済みのローカル状態から即座に再描画
-    }
+    renderDashboard(); // 全データの再取得はせず、更新済みのローカル状態から即座に再描画
   });
 }
 function periodManagerHtml(p){
