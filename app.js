@@ -105,6 +105,7 @@ async function renderDashboard(){
   const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
+  const avg7=bars.reduce((s,v)=>s+v,0)/7;
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
   const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
   $('#dashboard').innerHTML=`${nowDateTimeHtml()}
@@ -114,7 +115,7 @@ async function renderDashboard(){
   <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
   ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
   ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${escapeHtml(next.name)}（あと${days}日）</div>`:''}</div>
-  <div class='card'><h3>直近7日</h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
+  <div class='card'><h3>直近7日 <span class='small'>平均 ${fmtH(avg7)}</span></h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
   <details class='fold'><summary>詳しい内訳（教科・教材・ラベル・質）</summary>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderMaterialTotalsCard()}
@@ -180,8 +181,14 @@ function renderRecordForm(edit=null){
   const setDurationFromRange=()=>{const start=$('#fStart').value, end=$('#fEnd').value; if(!start||!end) return false; const mins=calcMinutesByTime(start,end); if(mins===null) return false; $('#fDuration').value=fmtHHMM(mins); return true;};
   const syncTimeFields=(source='duration')=>{
     const hasStart=!!$('#fStart').value, hasEnd=!!$('#fEnd').value, hasDuration=!!getMinutes();
+    if(source==='end'){
+      // 終了を編集した場合は、その値を維持したまま学習時間（なければ開始）を再計算する
+      if(hasStart && hasEnd) return setDurationFromRange();
+      if(hasEnd && hasDuration) return setStartFromEnd();
+      return false;
+    }
     if(hasStart && hasDuration) return setEndFromStart();
-    if(source==='end' && hasStart && hasEnd) return setDurationFromRange();
+    if(hasStart && hasEnd) return setDurationFromRange();
     if(hasEnd && hasDuration) return setStartFromEnd();
     return false;
   };
