@@ -45,7 +45,7 @@ const logicalDateStr = () => toDateStr(logicalNow());
 const nowTime = () => new Date().toTimeString().slice(0,5);
 const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return toDateStr(x); };
 const minFromTime = t => t ? (+t.slice(0,2))*60 + (+t.slice(3,5)) : null;
-const calcMinutesByTime = (s,e)=> (s&&e) ? Math.max(0, minFromTime(e)-minFromTime(s)) : null;
+const calcMinutesByTime = (s,e)=> { if(!s||!e) return null; const diff=minFromTime(e)-minFromTime(s); return diff>=0 ? diff : diff+1440; };
 const focusMinutes = r => Math.round((Number(r.minutes)||0) * (state.quality[r.quality] ?? 1));
 
 function escapeHtml(value){
@@ -95,7 +95,7 @@ function aggregate(){
   state.records.forEach(r=>{const min=+r.minutes||0,f=focusMinutes(r); out.total+=min; out.totalF+=f; if(r.date===t){out.today+=min;out.todayF+=f;} if(r.date>=w){out.week+=min;out.weekF+=f;} if((r.date||'').startsWith(m)){out.month+=min;out.monthF+=f;}});
   return out;
 }
-const fmtH = m => `${Math.floor((m||0)/60)}時間${Math.round((m||0)%60)}分`;
+const fmtH = m => { const t=Math.round(m||0); return `${Math.floor(t/60)}時間${t%60}分`; };
 const fmtHHMM = m => { const t=Math.min(1439,Math.max(0,Math.round(m||0))); return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 
