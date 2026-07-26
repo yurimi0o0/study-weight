@@ -45,7 +45,7 @@ const logicalDateStr = () => toDateStr(logicalNow());
 const nowTime = () => new Date().toTimeString().slice(0,5);
 const mondayOf = (d = new Date()) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return toDateStr(x); };
 const minFromTime = t => t ? (+t.slice(0,2))*60 + (+t.slice(3,5)) : null;
-const calcMinutesByTime = (s,e)=> (s&&e) ? Math.max(0, minFromTime(e)-minFromTime(s)) : null;
+const calcMinutesByTime = (s,e)=> { if(!s||!e) return null; const diff=minFromTime(e)-minFromTime(s); return diff>=0 ? diff : diff+1440; };
 const focusMinutes = r => Math.round((Number(r.minutes)||0) * (state.quality[r.quality] ?? 1));
 
 function escapeHtml(value){
@@ -83,7 +83,7 @@ async function loadAll(){
   state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
   const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf())?.targetMinutes)||0;
+  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
   const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
@@ -95,14 +95,14 @@ function aggregate(){
   state.records.forEach(r=>{const min=+r.minutes||0,f=focusMinutes(r); out.total+=min; out.totalF+=f; if(r.date===t){out.today+=min;out.todayF+=f;} if(r.date>=w){out.week+=min;out.weekF+=f;} if((r.date||'').startsWith(m)){out.month+=min;out.monthF+=f;}});
   return out;
 }
-const fmtH = m => `${Math.floor((m||0)/60)}時間${Math.round((m||0)%60)}分`;
+const fmtH = m => { const t=Math.round(m||0); return `${Math.floor(t/60)}時間${t%60}分`; };
 const fmtHHMM = m => { const t=Math.min(1439,Math.max(0,Math.round(m||0))); return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
   const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
-  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
+  const latest7=[...Array(7)].map((_,i)=>{const d=logicalNow(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
   const avg7=bars.reduce((s,v)=>s+v,0)/7;
@@ -261,7 +261,7 @@ ${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テス�
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
-$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
+$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{const name=$('#testName').value.trim(), date=$('#testDate').value; if(!name||!normalizeDateInput(date)) return alert('テスト名と日付を入力してください。'); await addDoc(userCol('tests'),{name,date,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
 $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
@@ -642,7 +642,26 @@ function bindSettingsPanelActions(){
     if(e.target?.id==='imp'){
       const f=$('#impFile').files[0]; if(!f) return;
       const j=JSON.parse(await f.text());
-      for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item);
+      // 教科・教材・ラベルはaddDocで新しいIDが割り振られるため、学習記録側の参照IDを新旧マッピングで付け替える
+      const idMap={subjects:{},materials:{},labels:{}};
+      for(const key of ['subjects','materials','labels']){
+        for(const item of (j[key]||[])){
+          const {id:oldId,...rest}=item;
+          const ref=await addDoc(userCol(key),rest);
+          if(oldId) idMap[key][oldId]=ref.id;
+        }
+      }
+      for(const item of (j.studyRecords||[])){
+        const {id:oldId,...rest}=item;
+        if(rest.subjectId) rest.subjectId=idMap.subjects[rest.subjectId]||rest.subjectId;
+        if(rest.materialId) rest.materialId=idMap.materials[rest.materialId]||rest.materialId;
+        if(Array.isArray(rest.labelIds)) rest.labelIds=rest.labelIds.map(lid=>idMap.labels[lid]||lid);
+        await addDoc(userCol('studyRecords'),rest);
+      }
+      for(const item of (j.tests||[])){
+        const {id:oldId,...rest}=item;
+        await addDoc(userCol('tests'),rest);
+      }
       if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true});
       await refresh();
     }
