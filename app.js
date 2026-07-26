@@ -642,7 +642,26 @@ function bindSettingsPanelActions(){
     if(e.target?.id==='imp'){
       const f=$('#impFile').files[0]; if(!f) return;
       const j=JSON.parse(await f.text());
-      for(const key of ['subjects','materials','labels','studyRecords','tests']) for(const item of (j[key]||[])) await addDoc(userCol(key==='studyRecords'?'studyRecords':key),item);
+      // 教科・教材・ラベルはaddDocで新しいIDが割り振られるため、学習記録側の参照IDを新旧マッピングで付け替える
+      const idMap={subjects:{},materials:{},labels:{}};
+      for(const key of ['subjects','materials','labels']){
+        for(const item of (j[key]||[])){
+          const {id:oldId,...rest}=item;
+          const ref=await addDoc(userCol(key),rest);
+          if(oldId) idMap[key][oldId]=ref.id;
+        }
+      }
+      for(const item of (j.studyRecords||[])){
+        const {id:oldId,...rest}=item;
+        if(rest.subjectId) rest.subjectId=idMap.subjects[rest.subjectId]||rest.subjectId;
+        if(rest.materialId) rest.materialId=idMap.materials[rest.materialId]||rest.materialId;
+        if(Array.isArray(rest.labelIds)) rest.labelIds=rest.labelIds.map(lid=>idMap.labels[lid]||lid);
+        await addDoc(userCol('studyRecords'),rest);
+      }
+      for(const item of (j.tests||[])){
+        const {id:oldId,...rest}=item;
+        await addDoc(userCol('tests'),rest);
+      }
       if(j.settings?.quality) await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality:j.settings.quality},{merge:true});
       await refresh();
     }
