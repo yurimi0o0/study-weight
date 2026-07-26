@@ -83,7 +83,7 @@ async function loadAll(){
   state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
   state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
   const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf())?.targetMinutes)||0;
+  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
   const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
   const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
@@ -102,7 +102,7 @@ const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${S
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
   const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
-  const latest7=[...Array(7)].map((_,i)=>{const d=new Date(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
+  const latest7=[...Array(7)].map((_,i)=>{const d=logicalNow(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
   const avg7=bars.reduce((s,v)=>s+v,0)/7;
@@ -261,7 +261,7 @@ ${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テス�
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
-$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
+$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{const name=$('#testName').value.trim(), date=$('#testDate').value; if(!name||!normalizeDateInput(date)) return alert('テスト名と日付を入力してください。'); await addDoc(userCol('tests'),{name,date,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
 $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
