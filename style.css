@@ -221,6 +221,21 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+
+/* ---------- キーボードフォーカス（アクセントで統一） ---------- */
+.btn:focus-visible,
+.chip:focus-visible,
+.link-btn:focus-visible,
+.menu-row:focus-visible,
+.cal-nav-btn:focus-visible,
+.cal-nav-label:focus-visible,
+.cal-cell:focus-visible,
+.bottom-nav button:focus-visible,
+details.fold > summary:focus-visible,
+label.list-item:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 textarea { min-height: 72px; resize: vertical; }
 #taskMemoInput { min-height: 150px; }
 label {
@@ -797,5 +812,13 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 
   .bottom-nav button {
     font-size: 0.58rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
