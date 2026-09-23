@@ -150,8 +150,8 @@ function renderRecordForm(edit=null){
     <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='sw-actions'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
     <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
     <label>メモ</label><textarea id='fMemo'>${escapeHtml(r.memo||'')}</textarea>
-    <div class='row-2'><div><label>日付</label><input id='fDate' type='date' value='${r.date}' /></div><div><label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' /></div></div>
     <div class='row-2'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
+    <div class='row-2'><div><label>日付</label><input id='fDate' type='date' value='${r.date}' /></div><div><label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' /></div></div>
     <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
     <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
     <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
@@ -185,6 +185,12 @@ function renderRecordForm(edit=null){
       // 終了を編集した場合は、その値を維持したまま学習時間（なければ開始）を再計算する
       if(hasStart && hasEnd) return setDurationFromRange();
       if(hasEnd && hasDuration) return setStartFromEnd();
+      return false;
+    }
+    if(source==='duration'){
+      // 学習時間を編集した場合は、終了（実際に終わった時刻）を維持したまま開始を再計算する。終了が未入力のときだけ開始から終了を計算する
+      if(hasEnd && hasDuration) return setStartFromEnd();
+      if(hasStart && hasDuration) return setEndFromStart();
       return false;
     }
     if(hasStart && hasDuration) return setEndFromStart();
@@ -256,12 +262,12 @@ $('#goals').innerHTML=`
 ${renderCalendarCard()}
 ${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${escapeHtml(t.name)}</span><span><b>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
 <details class='fold'><summary>設定（週目標・テスト・タスク・期間）</summary>
-  <div class='card'><h4>今週の目標時間</h4><input id='goalDuration' type='time' value='${fmtHHMM(state.weekGoal||0)}'/><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
+  <div class='card'><h4>今週の目標時間</h4><div class='row-2'><div><label>時間</label><input id='goalHours' type='number' min='0' step='1' value='${Math.floor((state.weekGoal||0)/60)}'/></div><div><label>分</label><input id='goalMinutes' type='number' min='0' max='59' step='1' value='${(state.weekGoal||0)%60}'/></div></div><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
   <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${escapeHtml(t.name)} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
-$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
+$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=Math.max(0,(+$('#goalHours').value||0)*60+(+$('#goalMinutes').value||0)); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{const name=$('#testName').value.trim(), date=$('#testDate').value; if(!name||!normalizeDateInput(date)) return alert('テスト名と日付を入力してください。'); await addDoc(userCol('tests'),{name,date,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
 $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
