@@ -320,12 +320,24 @@ function renderRecordForm(edit=null){
   if(edit) $('#cancelEdit').onclick=()=>switchScreen('list');
 }
 
+// タイムラインの同じ日の中での並び順（大きいほど上）。4:00 より前の時刻は前日の続きとして扱う
+function recordOrderKey(r){
+  const t=r.endTime||r.startTime;
+  if(t){ const m=minFromTime(t); return m<240?m+1440:m; }
+  // 時刻不明：記録を追加した時刻を目安にする
+  const created=r.createdAt?new Date(r.createdAt):null;
+  if(!created||isNaN(created)) return -1; // 追加した時刻もわからない古い記録は、その日の一番下
+  const shifted=new Date(created); shifted.setHours(shifted.getHours()-4);
+  const createdDay=toDateStr(shifted);
+  if(createdDay===r.date){ const m=created.getHours()*60+created.getMinutes(); return m<240?m+1440:m; }
+  return createdDay>r.date?99999:-1; // あとから過去の日に足した記録は、その日の一番上
+}
 let listMenuBound=false;
 let suppressMenuCloseUntil=0; // 長押しで開いた直後、指を離したときの合成クリックでメニューが閉じないようにする
 function renderList(){
   $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
-    const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
+    const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||recordOrderKey(b)-recordOrderKey(a));
     const today=logicalDateStr(), yest=addDays(today,-1);
     const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
     const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
@@ -921,10 +933,22 @@ document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>{ if(b.
 bindSettingsPanelActions();
 let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
 function showApp(){ $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true; }
+// 「読み込み中.」→「..」→「...」と点を増やして、固まっていないことを伝える
+let loadingTimer=null;
+function setLoading(on){
+  const badge=$('#syncStatus');
+  if(!on){ clearInterval(loadingTimer); loadingTimer=null; if(badge) badge.hidden=true; return; }
+  if(badge) badge.hidden=false;
+  if(loadingTimer) return;
+  let n=0;
+  const tick=()=>{ n=n%3+1; const dots='.'.repeat(n); document.querySelectorAll('.loading-dots').forEach(el=>{ el.textContent=dots; }); if(badge) badge.hidden=!!document.querySelector('#dashboard .loading-dots'); }; // 画面の真ん中に出ている間は、上の表示は出さない
+  tick(); loadingTimer=setInterval(tick,400);
+}
 function showLoading(){
   setTitle(SCREEN_TITLES.dashboard);
   document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen==='dashboard'));
-  if(!$('#dashboard').innerHTML.trim()) $('#dashboard').innerHTML=`<section class='surface empty-state' aria-live='polite'>読み込み中…</section>`;
+  if(!$('#dashboard').innerHTML.trim()) $('#dashboard').innerHTML=`<section class='surface empty-state' role='status'>読み込み中<span class='loading-dots' aria-hidden='true'>.</span></section>`;
+  setLoading(true);
 }
 // 端末内のデータで先に画面を出す。データが無ければ何もしない
 let cacheBootUid=null;
@@ -945,7 +969,7 @@ if(lastUid){ showApp(); showLoading(); bootFromCache(lastUid); }
 
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ lsSet(LAST_UID_KEY,null); cacheBootUid=null; state.serverLoaded=false; state.fromCache=false; lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
+  if(!user){ setLoading(false); lsSet(LAST_UID_KEY,null); cacheBootUid=null; state.serverLoaded=false; state.fromCache=false; lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
   state.userName=user.displayName||''; state.userEmail=user.email||'';
   if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
   lastAuthUid=user.uid;
@@ -958,11 +982,13 @@ onAuthStateChanged(auth, async user=>{
     await withTimeout(loadAll());
     if(await withTimeout(ensureSeedData())) await withTimeout(loadAll());
     await withTimeout(refresh(false, true));
+    setLoading(false);
     sessionStorage.removeItem('sdl_auto_reload_attempted');
   } catch(err) {
     // iOSでバックグラウンドから復帰した直後など、Firestoreへの通信が固まったまま応答が返らないことがある。
     // 一度だけ自動リロードして復旧を試みる（無限リロードループ防止のためsessionStorageで1回のみに制限）
     console.error('初期読み込みがタイムアウトまたは失敗しました:', err);
+    setLoading(false);
     if(!sessionStorage.getItem('sdl_auto_reload_attempted')){
       sessionStorage.setItem('sdl_auto_reload_attempted', '1');
       location.reload();

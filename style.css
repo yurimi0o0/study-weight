@@ -118,7 +118,13 @@ h4 { font-size: var(--fs-body); font-weight: 600; }
   max-width: var(--content-max);
   margin: 0 auto;
   padding: 12px 16px 8px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
+.sync-status { color: var(--muted); font-size: var(--fs-cap); flex: none; }
+.loading-dots { display: inline-block; width: 1.5em; text-align: left; }
 h1 {
   font-size: var(--fs-large);
   font-weight: 700;
