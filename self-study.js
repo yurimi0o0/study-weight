@@ -34,7 +34,7 @@ function markCalendar(){
     const done=isDone(cell.dataset.date);
     cell.classList.toggle('self-study-done', done);
     if(!cell.dataset.baseLabel) cell.dataset.baseLabel=cell.getAttribute('aria-label')||cell.dataset.date;
-    cell.setAttribute('aria-label', done?`${cell.dataset.baseLabel} 自習`:cell.dataset.baseLabel);
+    cell.setAttribute('aria-label', done?`${cell.dataset.baseLabel} 自習室`:cell.dataset.baseLabel);
     const marker=cell.querySelector('small'); if(marker && marker.textContent!==(done?'自':'')) marker.textContent=done?'自':'';
   });
 }
@@ -45,7 +45,7 @@ function injectCheck(){
   const card=document.createElement('div'); card.className='cal-check-card';
   const label=document.createElement('label'); label.className='list-item cal-check';
   const checkbox=document.createElement('input'); checkbox.type='checkbox'; checkbox.checked=isDone(date); checkbox.dataset.date=date;
-  const text=document.createElement('span'); text.textContent='この日は自習した';
+  const text=document.createElement('span'); text.textContent='自習室';
   label.append(checkbox,text); card.append(label); wrap.prepend(card);
   checkbox.onchange=async(e)=>{
     e.target.disabled=true;

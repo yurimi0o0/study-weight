@@ -102,6 +102,8 @@ const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${S
 const WEEKDAYS=['日','月','火','水','木','金','土'];
 const ICON_CHEV=`<svg class='ico chev' viewBox='0 0 24 24' aria-hidden='true'><path d='m9 6 6 6-6 6'/></svg>`;
 const ICON_BACK=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m15 6-6 6 6 6'/></svg>`;
+const ICON_EDIT=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 20h4L19 9l-4-4L4 16v4Z'/><path d='m13.5 6.5 4 4'/></svg>`;
+const ICON_TRASH=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 7h16'/><path d='M10 11v6M14 11v6'/><path d='M6 7l1 13h10l1-13'/><path d='M9 7V4h6v3'/></svg>`;
 const ICON_UP=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 15 6-6 6 6'/></svg>`;
 const ICON_DOWN=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 9 6 6 6-6'/></svg>`;
 const SCREEN_TITLES={dashboard:'ホーム',list:'タイムライン',record:'記録を追加',goals:'目標',settings:'設定'};
@@ -184,17 +186,12 @@ function renderRecordForm(edit=null){
   setTitle(edit?'記録を編集':'記録を追加');
   $('#record').innerHTML=`
   <section class='surface'>
-    <div class='surface-head'><h2>ストップウォッチ</h2></div>
-    <div id='swDisplay' class='sw-display'>00:00:00</div>
-    <div class='sw-actions'><button id='swToggle' type='button' class='btn primary'>開始</button><button id='swReset' type='button' class='btn'>リセット</button><button id='swSet' type='button' class='btn'>学習時間に反映</button></div>
-  </section>
-  <section class='surface'>
-    <div class='field-group'>
+    <div class='field-group date-dur'>
       <div class='field'><label for='fDate'>日付</label><input id='fDate' type='date' value='${r.date}' /></div>
       <div class='field'><span class='field-label' id='durLabel'>学習時間</span><div class='duration' role='group' aria-labelledby='durLabel'><input id='fDurH' type='number' inputmode='numeric' min='0' max='99' step='1' value='${mins?Math.floor(mins/60):''}' placeholder='0' aria-label='時間'/><span>時間</span><input id='fDurM' type='number' inputmode='numeric' min='0' max='59' step='1' value='${mins?mins%60:''}' placeholder='0' aria-label='分'/><span>分</span></div></div>
     </div>
     <div class='field-group'>
-      <label class='switch-row' for='fTimeUnknown'><span>開始・終了の時刻がわからない</span><input id='fTimeUnknown' type='checkbox' role='switch' ${timeUnknown?'checked':''}/></label>
+      <label class='switch-row' for='fTimeUnknown'><span>時刻がわからない</span><input id='fTimeUnknown' type='checkbox' role='switch' ${timeUnknown?'checked':''}/></label>
       <div class='row-2' id='timeRange' style='margin-top:8px' ${timeUnknown?'hidden':''}><div><label for='fStart'>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label for='fEnd'>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
     </div>
     <div class='field-group'>
@@ -209,6 +206,10 @@ function renderRecordForm(edit=null){
       <div class='row-2'><div><label for='fPages'>ページ数</label><input id='fPages' type='number' inputmode='numeric' value='${r.pages||''}' /></div><div><label for='fProblems'>問題数</label><input id='fProblems' type='number' inputmode='numeric' value='${r.problems||''}' /></div></div>
       <div class='field'><label for='fMemo'>メモ</label><textarea id='fMemo'>${escapeHtml(r.memo||'')}</textarea></div>
     </div>
+  </section>
+  <section class='surface sw'>
+    <div class='sw-head'><h3>ストップウォッチ</h3><span id='swDisplay' class='sw-display'>00:00:00</span></div>
+    <div class='sw-actions'><button id='swToggle' type='button' class='btn small primary'>開始</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div>
   </section>
   <div class='save-bar'>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}<button id='saveRecord' class='btn primary'>${edit?'変更を保存':'記録を追加'}</button></div>`;
   // 教科に紐づく教材だけを選択肢に出す（教科未設定の旧教材は全教科で表示）
@@ -287,15 +288,20 @@ function renderList(){
   $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
     const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
-    const groups=[]; rows.forEach(r=>{ const g=groups[groups.length-1]; if(g&&g.date===r.date) g.rows.push(r); else groups.push({date:r.date,rows:[r]}); });
-    const item=r=>`<div class='tl-item'>
-      <div class='tl-head'><span class='tl-title'>${escapeHtml(subjectName(r.subjectId))}${materialName(r.materialId)?` <span class='tl-material'>${escapeHtml(materialName(r.materialId))}</span>`:''}</span><span class='tl-minutes'>${fmtShort(r.minutes)}</span></div>
-      <div class='tl-meta'>${r.startTime||r.endTime?`<span>${r.startTime||'?'}–${r.endTime||'?'}</span>`:'<span>時刻不明</span>'}<span>集中 ${fmtShort(focusMinutes(r))}</span><span>質 ${escapeHtml(r.quality||'')}</span>${(r.labelIds||[]).map(id=>`<span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
-      ${r.memo?`<div class='tl-memo'>${escapeHtml(r.memo)}</div>`:''}
-      <div class='tl-actions'><button class='link-btn edit' data-id='${r.id}'>編集</button><button class='link-btn danger del' data-id='${r.id}'>削除</button></div>
-    </div>`;
-    $('#recordsWrap').innerHTML=groups.map(g=>`<div class='day-head'><b>${fmtMD(g.date)}</b><span>${fmtShort(g.rows.reduce((t,r)=>t+(+r.minutes||0),0))}</span></div><section class='surface day-group'>${g.rows.map(item).join('')}</section>`).join('')
-      ||`<section class='surface empty-state'>${state.records.length?'条件に合う記録はありません':'まだ記録がありません'}</section>`;
+    const today=logicalDateStr(), yest=addDays(today,-1);
+    const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
+    const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
+      return `<article class='post'>
+      <div class='avatar' aria-hidden='true'>${escapeHtml(sub.slice(0,1))}</div>
+      <div class='post-body'>
+        <div class='post-head'><b class='post-name'>${escapeHtml(sub)}</b>${mat?`<span class='post-sub'>${escapeHtml(mat)}</span>`:''}<time class='post-time' datetime='${r.date}'>${dayLabel(r.date)}${t?` ${t}`:''}</time></div>
+        ${r.memo?`<p class='post-text'>${escapeHtml(r.memo)}</p>`:''}
+        <div class='post-stats'><span class='post-big'>${fmtShort(r.minutes)}</span><span>${r.startTime||r.endTime?`${r.startTime||'?'}–${r.endTime||'?'}`:'時刻不明'}</span><span>集中 ${fmtShort(focusMinutes(r))}</span><span>質${escapeHtml(r.quality||'')}</span>${(r.labelIds||[]).map(id=>`<span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
+        <div class='post-actions'><button class='post-act edit' data-id='${r.id}' aria-label='編集'>${ICON_EDIT}</button><button class='post-act danger del' data-id='${r.id}' aria-label='削除'>${ICON_TRASH}</button></div>
+      </div>
+    </article>`; };
+    $('#recordsWrap').innerHTML=rows.length?`<div class='feed'>${rows.map(post).join('')}</div>`
+      :`<section class='surface empty-state'>${state.records.length?'条件に合う記録はありません':'まだ記録がありません'}</section>`;
     document.querySelectorAll('#recordsWrap .edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
     document.querySelectorAll('#recordsWrap .del').forEach(b=>b.onclick=async()=>{if(confirm('この記録を削除しますか？')){await deleteDoc(userDoc('studyRecords',b.dataset.id)); await refresh();}});
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
