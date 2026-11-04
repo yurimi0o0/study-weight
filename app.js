@@ -3,7 +3,8 @@ import {
   getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getDocsFromCache, getDocFromCache,
+  collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { getMessaging, getToken, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js';
@@ -28,7 +29,13 @@ const FCM_VAPID_KEY = 'BI5D69jRhWmow6YoJh2QRpXk6XHiJLckmQsoQRrzVkvCWwOh3w7H1adDO
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// 端末内に読み込んだデータを残しておき、次に開いたときはまずそれで画面を出す
+let db;
+try { db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); }
+catch (_) { db = getFirestore(app); }
+const LAST_UID_KEY = 'sdl_last_uid';
+const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+const lsSet = (k, v) => { try { v==null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} };
 const functions = getFunctions(app);
 let messaging = null; // 未対応ブラウザでgetMessaging(app)が例外を投げるため遅延初期化
 let swReg = null;      // Service Worker登録（getTokenに渡す）
@@ -70,24 +77,58 @@ function normalizeDateInput(input){
 function userCol(path){ return collection(db, `users/${state.uid}/${path}`); }
 function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
+// 初回だけ教科・ラベル・設定の初期値を入れる。loadAll() の結果を見て判断するので、追加の読み込みはしない
 async function ensureSeedData(){
-  await setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true});
-  if ((await getDocs(userCol('subjects'))).empty) for (const [i, name] of DEFAULT_SUBJECTS.entries()) await addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
-  if ((await getDocs(userCol('labels'))).empty) for (const name of DEFAULT_LABELS) await addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
-  const settingsRef = doc(db, `users/${state.uid}/settings/main`); if (!(await getDoc(settingsRef)).exists()) await setDoc(settingsRef, { quality: DEFAULT_QUALITY, appName: APP_NAME });
+  if(state.fromCache) return false; // 圏外などで最新のデータが読めていないときは、空に見えても初期データを入れない（二重に作らないため）
+  setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true}).catch(()=>{}); // 完了を待たない
+  const jobs=[];
+  if (!state.subjects.length) DEFAULT_SUBJECTS.forEach((name,i)=>jobs.push(addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() })));
+  if (!state.labels.length) DEFAULT_LABELS.forEach(name=>jobs.push(addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() })));
+  if (!state.settingsExists) jobs.push(setDoc(doc(db, `users/${state.uid}/settings/main`), { quality: DEFAULT_QUALITY, appName: APP_NAME }));
+  if (!jobs.length) return false;
+  await Promise.all(jobs);
+  return true;
 }
-async function loadAll(){
-  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
-  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
-  state.labels=(await getDocs(query(userCol('labels')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
-  const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
-  const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
-  const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
-  state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
-  state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
+// fromCache=true のときは端末内のデータだけを読む（通信しないのですぐ返る）
+async function loadAll(fromCache=false){
+  const uid=state.uid; // 読み込み中に別のユーザーに切り替わったら、結果を捨てる
+  const many = fromCache ? getDocsFromCache : getDocs;
+  const one = fromCache ? getDocFromCache : getDoc;
+  const rows = snap => snap.docs.map(d=>({id:d.id,...d.data()}));
+  const byOrder = (a,b)=>(a.order??999)-(b.order??999)||(a.name||'').localeCompare(b.name||'','ja');
+  const [subjects, materials, labels, records, tests, goals, settingsSnap, scheduleSnap, periods, days] = await Promise.all([
+    many(query(userCol('subjects'))),
+    many(query(userCol('materials'))),
+    many(query(userCol('labels'))),
+    many(query(userCol('studyRecords'),orderBy('date','desc'))),
+    many(query(userCol('tests'),orderBy('date','asc'))),
+    many(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc'))),
+    one(doc(db,`users/${state.uid}/settings/main`)),
+    one(doc(db,`users/${state.uid}/settings/schedule`)),
+    many(query(userCol('schedulePeriods'))),
+    many(userCol('scheduleDays')),
+  ]);
+  if(uid!==state.uid) return;
+  // 圏外のときは普通の読み込みでも端末内のデータが返ってくる。1つでもそうなら「古いかもしれないデータ」として扱う
+  const stale = fromCache || [subjects, materials, labels, records, tests, goals, settingsSnap, scheduleSnap, periods, days].some(x=>x.metadata?.fromCache);
+  if(stale && state.serverLoaded){
+    // 最新のデータを一度読めたあとは、古いデータで画面を上書きしない。
+    // ただし普通の読み込みが端末内のデータで返ってきた（圏外になった）ときは、書き込みは止める
+    if(!fromCache) state.fromCache=true;
+    return;
+  }
+  if(!stale) state.serverLoaded=true;
+  state.subjects=rows(subjects).sort(byOrder);
+  state.materials=rows(materials).sort(byOrder);
+  state.labels=rows(labels);
+  state.records=rows(records);
+  state.tests=rows(tests);
+  state.weekGoal=(rows(goals).find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
+  const settings=settingsSnap.exists()?settingsSnap.data():null; state.settingsExists=!!settings; state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
+  state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
+  state.schedulePeriods=rows(periods).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
+  state.scheduleDays=rows(days);
+  state.fromCache=stale;
 }
 
 function aggregate(){
@@ -287,11 +328,24 @@ function renderRecordForm(edit=null){
   if(edit) $('#cancelEdit').onclick=()=>switchScreen('list');
 }
 
+// タイムラインの同じ日の中での並び順（大きいほど上）。4:00 より前の時刻は前日の続きとして扱う
+function recordOrderKey(r){
+  const t=r.endTime||r.startTime;
+  if(t){ const m=minFromTime(t); return m<240?m+1440:m; }
+  // 時刻不明：記録を追加した時刻を目安にする
+  const created=r.createdAt?new Date(r.createdAt):null;
+  if(!created||isNaN(created)) return -1; // 追加した時刻もわからない古い記録は、その日の一番下
+  const shifted=new Date(created); shifted.setHours(shifted.getHours()-4);
+  const createdDay=toDateStr(shifted);
+  if(createdDay===r.date){ const m=created.getHours()*60+created.getMinutes(); return m<240?m+1440:m; }
+  return createdDay>r.date?99999:-1; // あとから過去の日に足した記録は、その日の一番上
+}
 let listMenuBound=false;
+let suppressMenuCloseUntil=0; // 長押しで開いた直後、指を離したときの合成クリックでメニューが閉じないようにする
 function renderList(){
   $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
-    const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
+    const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||recordOrderKey(b)-recordOrderKey(a));
     const today=logicalDateStr(), yest=addDays(today,-1);
     const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
     const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
@@ -323,14 +377,14 @@ function renderList(){
     document.querySelectorAll('#recordsWrap .post').forEach(p=>{
       p.querySelector('.post-more').onclick=e=>{ e.stopPropagation(); p.querySelector('.post-menu')?closeMenu():openMenu(p); };
       // 長押しでも開く（指が動いたらスクロールとみなしてやめる）
-      let timer=null, sx=0, sy=0;
-      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
+      let timer=null, sx=0, sy=0, longPressed=false;
+      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; longPressed=false; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; longPressed=true; suppressMenuCloseUntil=Date.now()+800; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
       p.addEventListener('touchmove',e=>{ const t=e.touches[0]; if(timer&&(Math.abs(t.clientX-sx)>8||Math.abs(t.clientY-sy)>8)){ clearTimeout(timer); timer=null; } },{passive:true});
-      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,()=>{ if(timer){ clearTimeout(timer); timer=null; } }));
+      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,e=>{ if(timer){ clearTimeout(timer); timer=null; } if(longPressed&&ev==='touchend'){ if(e.cancelable) e.preventDefault(); suppressMenuCloseUntil=Date.now()+350; } longPressed=false; },{passive:false}));
       p.addEventListener('contextmenu',e=>{ if(e.target.closest('.post-menu')) return; e.preventDefault(); openMenu(p); });
     });
     if(!listMenuBound){ listMenuBound=true;
-      document.addEventListener('click',e=>{ if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
+      document.addEventListener('click',e=>{ if(Date.now()<suppressMenuCloseUntil){ suppressMenuCloseUntil=0; return; } if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
       document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const open=document.querySelector('.post-menu'); if(open){ const b=open.closest('.post')?.querySelector('.post-more'); open.remove(); b?.setAttribute('aria-expanded','false'); b?.focus(); } } });
     }
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
@@ -436,6 +490,7 @@ function computeCarryoverIds(date){
 }
 async function ensureScheduleDay(date){
   const existing=getScheduleDay(date);
+  if(state.fromCache) return existing||null; // 端末内の古いデータのままでは書き込まない（他の端末の記録を上書きしないため）
   const isToday=date===logicalDateStr();
   if(existing){
     const eff=effectiveTasksFor(date);
@@ -467,10 +522,12 @@ async function ensureScheduleDay(date){
   const entry={id:date,...data}; state.scheduleDays.push(entry); return entry;
 }
 async function toggleScheduleTask(date,taskId){
+  if(state.fromCache) return; // 端末内の古い行を書き戻すと、他の端末での変更を上書きしてしまう
   const d=await ensureScheduleDay(date); if(!d) return;
-  const done={...(d.done||{}), [taskId]: !d.done?.[taskId]};
-  d.done=done; // ローカル状態を即時反映してからバックエンドに書き込む
-  await setDoc(scheduleDayDoc(date), {...d,done,updatedAt:new Date().toISOString()}, {merge:true});
+  const next=!d.done?.[taskId];
+  d.done={...(d.done||{}), [taskId]: next}; // ローカル状態を即時反映してからバックエンドに書き込む
+  // 押したタスクのチェックだけを書き込む（行をまるごと書き戻すと、手元が古いときに他の端末での変更を上書きしてしまう）
+  await setDoc(scheduleDayDoc(date), {done:{[taskId]:next}, updatedAt:new Date().toISOString()}, {merge:true});
 }
 function scheduleCarryover(){
   const today=logicalDateStr(); const yesterday=addDays(today,-1);
@@ -507,8 +564,8 @@ function tasksCardHtml(){
   const emptyMsg=activePeriod
     ?`「${escapeHtml(activePeriod.name)}」期間のタスクはまだありません。目標タブの設定から追加できます。`
     :'タスクはまだありません。目標タブの設定から追加できます。';
-  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''}/><span>${escapeHtml(t.text)}</span><span class='tag'>${fmtMD(t.date).replace(/\(.\)$/,'')}の分</span></label>`).join('');
-  const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
+  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''} ${state.fromCache?'disabled':''}/><span>${escapeHtml(t.text)}</span><span class='tag'>${fmtMD(t.date).replace(/\(.\)$/,'')}の分</span></label>`).join('');
+  const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''} ${state.fromCache?'disabled':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
   return `<section class='surface'>
     <div class='surface-head'><h2>今日のタスク</h2><span class='muted tabnum'>${tasks.length?`${doneCount}/${tasks.length}`:''}</span></div>
     ${activePeriod||carry.length?`<div class='muted' style='margin:-8px 0 4px'>${activePeriod?`${escapeHtml(activePeriod.name)}の期間中`:''}${activePeriod&&carry.length?'　':''}${carry.length?`前日からの繰り越し ${carry.length}件`:''}</div>`:''}
@@ -856,11 +913,12 @@ function bindSettingsPanelActions(){
 }
 
 function switchScreen(id){ setTitle(SCREEN_TITLES[id]||APP_NAME); if(!$('#'+id).classList.contains('active')) window.scrollTo(0,0); document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){
-  await loadAll();
+async function refresh(reload=true, keepRecordForm=false){
+  if(reload) await loadAll();
+  updateSyncBadge();
   const today=logicalDateStr();
   if(state.schedule?.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today); // タスク編集直後でも、表示中の画面に関わらず今日の分を再同期する
-  ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); });
+  ['dashboard','record','list','goals','settings'].forEach(id=>{ if(keepRecordForm && id==='record') return; if($('#'+id).classList.contains('active')) switchScreen(id); });
   maybeNotifyToday();
 }
 
@@ -884,22 +942,81 @@ $('#loginBtn').onclick=async()=>{
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>{ if(b.dataset.screen==='settings') state.settingsMode='menu'; switchScreen(b.dataset.screen); });
 bindSettingsPanelActions();
 let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
+function showApp(){ $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true; }
+// 最新のデータが読めなかったとき（圏外など）は、チェックが押せない理由がわかるように右上に出しておく
+function updateSyncBadge(){
+  const badge=$('#syncStatus'); if(!badge || loadingTimer) return;
+  if(state.uid && state.fromCache){ badge.textContent='オフライン'; badge.hidden=false; } else badge.hidden=true;
+}
+// 通信が切れたら、次の読み込みを待たずにすぐ書き込みを止める
+window.addEventListener('offline', ()=>{
+  if(!state.uid || state.fromCache) return;
+  state.fromCache=true; updateSyncBadge();
+  const active=document.querySelector('.screen.active')?.id;
+  if(active==='dashboard') renderDashboard(); // チェックを押せない表示に描き直す
+});
+// 通信が戻ったら読み込み直して、書き込みできる状態に戻す
+window.addEventListener('online', ()=>{ if(state.uid && state.fromCache) refresh(true, true).catch(err=>console.error(err)); });
+// 「読み込み中.」→「..」→「...」と点を増やして、固まっていないことを伝える
+let loadingTimer=null;
+function setLoading(on){
+  const badge=$('#syncStatus');
+  if(!on){
+    clearInterval(loadingTimer); loadingTimer=null;
+    updateSyncBadge();
+    return;
+  }
+  if(badge){ badge.innerHTML="読み込み中<span class='loading-dots' aria-hidden='true'>.</span>"; badge.hidden=false; }
+  if(loadingTimer) return;
+  let n=0;
+  const tick=()=>{ n=n%3+1; const dots='.'.repeat(n); document.querySelectorAll('.loading-dots').forEach(el=>{ el.textContent=dots; }); if(badge) badge.hidden=!!document.querySelector('#dashboard .loading-dots'); }; // 画面の真ん中に出ている間は、上の表示は出さない
+  tick(); loadingTimer=setInterval(tick,400);
+}
+function showLoading(){
+  setTitle(SCREEN_TITLES.dashboard);
+  document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen==='dashboard'));
+  if(!$('#dashboard').innerHTML.trim()) $('#dashboard').innerHTML=`<section class='surface empty-state' role='status'>読み込み中<span class='loading-dots' aria-hidden='true'>.</span></section>`;
+  setLoading(true);
+}
+// 端末内のデータで先に画面を出す。データが無ければ何もしない
+let cacheBootUid=null;
+async function bootFromCache(uid){
+  if(cacheBootUid===uid) return; cacheBootUid=uid;
+  state.uid=uid;
+  try{
+    await withTimeout(loadAll(true), 3000);
+    if(state.uid!==uid || !state.fromCache) return; // 途中でログアウトした、または通信の結果がもう届いている
+    if(!state.subjects.length || state.serverLoaded) return;
+    const active=document.querySelector('.screen.active')?.id||'dashboard';
+    switchScreen(active==='record'?'dashboard':active);
+  }catch(_){ /* 初めて開いた端末など、端末内にデータが無いとき */ }
+}
+// 前回ログインしていた端末では、ログインの確認を待つ間も「読み込み中」を出す。
+// データはログインが確認できてから表示する（期限切れなどで別の状態になっていたときに、前回のデータを見せないため）
+if(lsGet(LAST_UID_KEY)){ showApp(); showLoading(); }
+
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
+  if(!user){ setLoading(false); lsSet(LAST_UID_KEY,null); cacheBootUid=null; state.serverLoaded=false; state.fromCache=false; lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
   state.userName=user.displayName||''; state.userEmail=user.email||'';
   if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
   lastAuthUid=user.uid;
-  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true;
+  lsSet(LAST_UID_KEY,user.uid);
+  if(state.uid && state.uid!==user.uid){ cacheBootUid=null; state.serverLoaded=false; $('#dashboard').innerHTML=''; }
+  showApp(); showLoading();
+  bootFromCache(user.uid);
+  state.uid=user.uid;
   try {
-    await withTimeout(ensureSeedData());
-    await withTimeout(refresh());
-    switchScreen('dashboard');
+    await withTimeout(loadAll());
+    if(await withTimeout(ensureSeedData())) await withTimeout(loadAll());
+    await withTimeout(refresh(false, true));
+    setLoading(false);
     sessionStorage.removeItem('sdl_auto_reload_attempted');
   } catch(err) {
     // iOSでバックグラウンドから復帰した直後など、Firestoreへの通信が固まったまま応答が返らないことがある。
     // 一度だけ自動リロードして復旧を試みる（無限リロードループ防止のためsessionStorageで1回のみに制限）
     console.error('初期読み込みがタイムアウトまたは失敗しました:', err);
+    setLoading(false);
     if(!sessionStorage.getItem('sdl_auto_reload_attempted')){
       sessionStorage.setItem('sdl_auto_reload_attempted', '1');
       location.reload();
