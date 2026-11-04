@@ -117,7 +117,7 @@ async function toggleSelfStudy(date){
   selfStudyDays.set(date,{id:date,...(selfStudyDays.get(date)||{}),...data});
 }
 
-onAuthStateChanged(auth, async(user)=>{ uid=user?.uid||null; selfStudyDays=new Map(); skippedCarryovers=new Set(); if(uid){ await loadSelfStudyDays(); await loadSkippedCarryovers(); } scheduleRender(); });
+onAuthStateChanged(auth, async(user)=>{ uid=user?.uid||null; selfStudyDays=new Map(); skippedCarryovers=new Set(); if(uid){ await Promise.all([loadSelfStudyDays(), loadSkippedCarryovers()]); } scheduleRender(); });
 document.addEventListener('click', (event)=>{ if(event.target.closest('.cal-cell[data-date]')) setTimeout(scheduleRender, 0); });
 new MutationObserver(scheduleRender).observe(document.body, {childList:true, subtree:true});
 injectStyles();

@@ -3,7 +3,8 @@ import {
   getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getDocsFromCache, getDocFromCache,
+  collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { getMessaging, getToken, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js';
@@ -28,7 +29,13 @@ const FCM_VAPID_KEY = 'BI5D69jRhWmow6YoJh2QRpXk6XHiJLckmQsoQRrzVkvCWwOh3w7H1adDO
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// 端末内に読み込んだデータを残しておき、次に開いたときはまずそれで画面を出す
+let db;
+try { db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); }
+catch (_) { db = getFirestore(app); }
+const LAST_UID_KEY = 'sdl_last_uid';
+const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+const lsSet = (k, v) => { try { v==null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (_) {} };
 const functions = getFunctions(app);
 let messaging = null; // 未対応ブラウザでgetMessaging(app)が例外を投げるため遅延初期化
 let swReg = null;      // Service Worker登録（getTokenに渡す）
@@ -70,24 +77,48 @@ function normalizeDateInput(input){
 function userCol(path){ return collection(db, `users/${state.uid}/${path}`); }
 function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
+// 初回だけ教科・ラベル・設定の初期値を入れる。loadAll() の結果を見て判断するので、追加の読み込みはしない
 async function ensureSeedData(){
-  await setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true});
-  if ((await getDocs(userCol('subjects'))).empty) for (const [i, name] of DEFAULT_SUBJECTS.entries()) await addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
-  if ((await getDocs(userCol('labels'))).empty) for (const name of DEFAULT_LABELS) await addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
-  const settingsRef = doc(db, `users/${state.uid}/settings/main`); if (!(await getDoc(settingsRef)).exists()) await setDoc(settingsRef, { quality: DEFAULT_QUALITY, appName: APP_NAME });
+  setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true}).catch(()=>{}); // 完了を待たない
+  const jobs=[];
+  if (!state.subjects.length) DEFAULT_SUBJECTS.forEach((name,i)=>jobs.push(addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() })));
+  if (!state.labels.length) DEFAULT_LABELS.forEach(name=>jobs.push(addDoc(userCol('labels'), { name, color:'#64b5f6', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() })));
+  if (!state.settingsExists) jobs.push(setDoc(doc(db, `users/${state.uid}/settings/main`), { quality: DEFAULT_QUALITY, appName: APP_NAME }));
+  if (!jobs.length) return false;
+  await Promise.all(jobs);
+  return true;
 }
-async function loadAll(){
-  state.subjects=(await getDocs(query(userCol('subjects')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
-  state.materials=(await getDocs(query(userCol('materials')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||a.name.localeCompare(b.name,'ja'));
-  state.labels=(await getDocs(query(userCol('labels')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.records=(await getDocs(query(userCol('studyRecords'),orderBy('date','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.tests=(await getDocs(query(userCol('tests'),orderBy('date','asc')))).docs.map(d=>({id:d.id,...d.data()}));
-  const goals=(await getDocs(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc')))).docs.map(d=>({id:d.id,...d.data()}));
-  state.weekGoal=(goals.find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
-  const settings=(await getDoc(doc(db,`users/${state.uid}/settings/main`))).data(); state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
-  const scheduleSnap=await getDoc(doc(db,`users/${state.uid}/settings/schedule`)); state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
-  state.schedulePeriods=(await getDocs(query(userCol('schedulePeriods')))).docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
-  state.scheduleDays=(await getDocs(userCol('scheduleDays'))).docs.map(d=>({id:d.id,...d.data()}));
+// fromCache=true のときは端末内のデータだけを読む（通信しないのですぐ返る）
+async function loadAll(fromCache=false){
+  const many = fromCache ? getDocsFromCache : getDocs;
+  const one = fromCache ? getDocFromCache : getDoc;
+  const rows = snap => snap.docs.map(d=>({id:d.id,...d.data()}));
+  const byOrder = (a,b)=>(a.order??999)-(b.order??999)||(a.name||'').localeCompare(b.name||'','ja');
+  const [subjects, materials, labels, records, tests, goals, settingsSnap, scheduleSnap, periods, days] = await Promise.all([
+    many(query(userCol('subjects'))),
+    many(query(userCol('materials'))),
+    many(query(userCol('labels'))),
+    many(query(userCol('studyRecords'),orderBy('date','desc'))),
+    many(query(userCol('tests'),orderBy('date','asc'))),
+    many(query(userCol('weeklyGoals'),orderBy('weekStartDate','desc'))),
+    one(doc(db,`users/${state.uid}/settings/main`)),
+    one(doc(db,`users/${state.uid}/settings/schedule`)),
+    many(query(userCol('schedulePeriods'))),
+    many(userCol('scheduleDays')),
+  ]);
+  if(fromCache && state.serverLoaded) return; // 通信の結果が先に届いていたら、古いデータで上書きしない
+  if(!fromCache) state.serverLoaded=true;
+  state.subjects=rows(subjects).sort(byOrder);
+  state.materials=rows(materials).sort(byOrder);
+  state.labels=rows(labels);
+  state.records=rows(records);
+  state.tests=rows(tests);
+  state.weekGoal=(rows(goals).find(g=>g.weekStartDate===mondayOf(logicalNow()))?.targetMinutes)||0;
+  const settings=settingsSnap.exists()?settingsSnap.data():null; state.settingsExists=!!settings; state.quality=settings?.quality || { ...DEFAULT_QUALITY }; state.taskMemo=settings?.taskMemo || '';
+  state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
+  state.schedulePeriods=rows(periods).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
+  state.scheduleDays=rows(days);
+  state.fromCache=fromCache;
 }
 
 function aggregate(){
@@ -437,6 +468,7 @@ function computeCarryoverIds(date){
 }
 async function ensureScheduleDay(date){
   const existing=getScheduleDay(date);
+  if(state.fromCache) return existing||null; // 端末内の古いデータのままでは書き込まない（他の端末の記録を上書きしないため）
   const isToday=date===logicalDateStr();
   if(existing){
     const eff=effectiveTasksFor(date);
@@ -857,11 +889,11 @@ function bindSettingsPanelActions(){
 }
 
 function switchScreen(id){ setTitle(SCREEN_TITLES[id]||APP_NAME); if(!$('#'+id).classList.contains('active')) window.scrollTo(0,0); document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
-async function refresh(){
-  await loadAll();
+async function refresh(reload=true, keepRecordForm=false){
+  if(reload) await loadAll();
   const today=logicalDateStr();
   if(state.schedule?.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today); // タスク編集直後でも、表示中の画面に関わらず今日の分を再同期する
-  ['dashboard','record','list','goals','settings'].forEach(id=>{ if($('#'+id).classList.contains('active')) switchScreen(id); });
+  ['dashboard','record','list','goals','settings'].forEach(id=>{ if(keepRecordForm && id==='record') return; if($('#'+id).classList.contains('active')) switchScreen(id); });
   maybeNotifyToday();
 }
 
@@ -885,17 +917,44 @@ $('#loginBtn').onclick=async()=>{
 document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>{ if(b.dataset.screen==='settings') state.settingsMode='menu'; switchScreen(b.dataset.screen); });
 bindSettingsPanelActions();
 let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
+function showApp(){ $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true; }
+function showLoading(){
+  setTitle(SCREEN_TITLES.dashboard);
+  document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen==='dashboard'));
+  if(!$('#dashboard').innerHTML.trim()) $('#dashboard').innerHTML=`<section class='surface empty-state' aria-live='polite'>読み込み中…</section>`;
+}
+// 端末内のデータで先に画面を出す。データが無ければ何もしない
+let cacheBootUid=null;
+async function bootFromCache(uid){
+  if(cacheBootUid===uid) return; cacheBootUid=uid;
+  state.uid=uid;
+  try{
+    await withTimeout(loadAll(true), 3000);
+    if(state.uid!==uid || !state.fromCache) return; // 途中でログアウトした、または通信の結果がもう届いている
+    if(!state.subjects.length || state.serverLoaded) return;
+    const active=document.querySelector('.screen.active')?.id||'dashboard';
+    switchScreen(active==='record'?'dashboard':active);
+  }catch(_){ /* 初めて開いた端末など、端末内にデータが無いとき */ }
+}
+// ログインの確認を待たずに、前回のユーザーのデータを端末内から表示する
+const lastUid=lsGet(LAST_UID_KEY);
+if(lastUid){ showApp(); showLoading(); bootFromCache(lastUid); }
+
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
+  if(!user){ lsSet(LAST_UID_KEY,null); cacheBootUid=null; state.serverLoaded=false; state.fromCache=false; lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
   state.userName=user.displayName||''; state.userEmail=user.email||'';
   if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
   lastAuthUid=user.uid;
-  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true;
+  lsSet(LAST_UID_KEY,user.uid);
+  if(state.uid && state.uid!==user.uid){ cacheBootUid=null; state.serverLoaded=false; $('#dashboard').innerHTML=''; }
+  showApp(); showLoading();
+  bootFromCache(user.uid);
+  state.uid=user.uid;
   try {
-    await withTimeout(ensureSeedData());
-    await withTimeout(refresh());
-    switchScreen('dashboard');
+    await withTimeout(loadAll());
+    if(await withTimeout(ensureSeedData())) await withTimeout(loadAll());
+    await withTimeout(refresh(false, true));
     sessionStorage.removeItem('sdl_auto_reload_attempted');
   } catch(err) {
     // iOSでバックグラウンドから復帰した直後など、Firestoreへの通信が固まったまま応答が返らないことがある。
