@@ -99,29 +99,65 @@ const fmtH = m => { const t=Math.round(m||0); return `${Math.floor(t/60)}時間$
 const fmtHHMM = m => { const t=Math.min(1439,Math.max(0,Math.round(m||0))); return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 const fmtClock = m => { const t=((Math.round(m||0)%1440)+1440)%1440; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; };
 
+const WEEKDAYS=['日','月','火','水','木','金','土'];
+const ICON_CHEV=`<svg class='ico chev' viewBox='0 0 24 24' aria-hidden='true'><path d='m9 6 6 6-6 6'/></svg>`;
+const ICON_BACK=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m15 6-6 6 6 6'/></svg>`;
+const ICON_EDIT=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 20h4L19 9l-4-4L4 16v4Z'/><path d='m13.5 6.5 4 4'/></svg>`;
+const ICON_TRASH=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 7h16'/><path d='M10 11v6M14 11v6'/><path d='M6 7l1 13h10l1-13'/><path d='M9 7V4h6v3'/></svg>`;
+const ICON_MORE=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><circle cx='5' cy='12' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/></svg>`;
+const ICON_UP=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 15 6-6 6 6'/></svg>`;
+const ICON_DOWN=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 9 6 6 6-6'/></svg>`;
+const SCREEN_TITLES={dashboard:'ホーム',list:'タイムライン',record:'記録を追加',goals:'目標',settings:'設定'};
+const setTitle=t=>{ $('#appTitle').textContent=t; };
+const fmtMD = dateStr => { const d=parseDateStr(dateStr); return `${d.getMonth()+1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`; };
+const bigDuration = m => { const t=Math.round(m||0); const h=Math.floor(t/60), mm=t%60; return h?`${h}<span class='unit'>時間</span>${mm}<span class='unit'>分</span>`:`${mm}<span class='unit'>分</span>`; };
+const fmtShort = m => { const t=Math.round(m||0); const h=Math.floor(t/60), mm=t%60; return h?`${h}時間${mm}分`:`${mm}分`; };
+let selectedBarIndex=6;
+
 async function renderDashboard(){
   const baseDate=logicalDateStr(); const a=aggregate(); const next=state.tests.filter(t=>t.date>=baseDate).sort((x,y)=>x.date.localeCompare(y.date))[0];
-  const days=next?Math.ceil((new Date(next.date)-new Date(baseDate))/86400000):null;
-  const latest7=[...Array(7)].map((_,i)=>{const d=logicalNow(); d.setDate(d.getDate()-(6-i)); return toDateStr(d);});
+  const days=next?Math.ceil((parseDateStr(next.date)-parseDateStr(baseDate))/86400000):null;
+  const latest7=[...Array(7)].map((_,i)=>addDays(baseDate,i-6));
   const bars=latest7.map(d=>state.records.filter(r=>r.date===d).reduce((s,r)=>s+(+r.minutes||0),0));
   const max=Math.max(1,...bars);
   const avg7=bars.reduce((s,v)=>s+v,0)/7;
   if(state.schedule?.startDate && baseDate>=state.schedule.startDate) await ensureScheduleDay(baseDate);
   const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
-  $('#dashboard').innerHTML=`${nowDateTimeHtml()}
-  ${renderScheduleStreakCard()}
+  if(selectedBarIndex<0||selectedBarIndex>6) selectedBarIndex=6;
+  $('#dashboard').innerHTML=`
+  <section class='surface'>
+    <div class='hero-meta'><span id='nowClock'>${formatNowDateTime()}</span><span>4:00で日付が変わります</span></div>
+    <div class='hero-main'>
+      <div><div class='hero-label'>今日</div><div class='hero-value'>${bigDuration(a.today)}</div><div class='hero-sub'>集中 ${fmtShort(a.todayF)}</div></div>
+      ${streakHtml()}
+    </div>
+    ${streakBrokenHtml()}
+    ${state.weekGoal?`<div class='meter-row'><span>今週 <b>${fmtShort(a.week)}</b> / 目標 ${fmtShort(state.weekGoal)}</span><b>${pct}%</b></div><div class='progress' role='progressbar' aria-valuemin='0' aria-valuemax='100' aria-valuenow='${pct}' aria-label='今週の目標の達成率'><div class='progress-fill' style='width:${pct}%'></div></div>`:''}
+    ${next?`<div class='hero-row'><span>次のテスト　<b>${escapeHtml(next.name)}</b></span><span>あと <b>${days}</b> 日</span></div>`:''}
+  </section>
   ${tasksCardHtml()}
+  <section class='surface'>
+    <div class='surface-head'><h2>直近7日</h2><span class='muted tabnum'>平均 ${fmtShort(avg7)}</span></div>
+    <div class='chart-readout' id='barReadout' aria-live='polite'></div>
+    <div class='bars' role='group' aria-label='直近7日の学習時間'>${bars.map((v,i)=>`<button type='button' class='bar-btn' data-i='${i}' aria-pressed='${i===selectedBarIndex}' aria-label='${fmtMD(latest7[i])} ${fmtShort(v)}'><span class='bar' style='height:${v?Math.max(3,v/max*100):0}%'></span></button>`).join('')}</div>
+    <div class='bar-labels'>${latest7.map((d,i)=>`<span data-i='${i}' class='${i===selectedBarIndex?'is-selected':''}'>${i===6?'今日':WEEKDAYS[parseDateStr(d).getDay()]}</span>`).join('')}</div>
+  </section>
+  <section class='surface'>${[['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='total-row'><span class='name'>${v[0]}</span><span class='value'>${fmtShort(v[1])}</span><span class='muted'>集中 ${fmtShort(v[2])}</span></div>`).join('')}</section>
   ${taskMemoHtml()}
-  <div class='card'><h3>学習時間</h3><div class='grid'>${[['今日',a.today,a.todayF],['今週',a.week,a.weekF],['今月',a.month,a.monthF],['累計',a.total,a.totalF]].map(v=>`<div class='metric'><div>${v[0]}</div><div class='value'>${fmtH(v[1])}</div><div class='small'>集中 ${fmtH(v[2])}</div></div>`).join('')}</div>
-  ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>今週目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:''}
-  ${next?`<div class='small' style='margin-top:8px'>次のテスト: ${escapeHtml(next.name)}（あと${days}日）</div>`:''}</div>
-  <div class='card'><h3>直近7日 <span class='small'>平均 ${fmtH(avg7)}</span></h3><div class='bars'>${bars.map(v=>`<div class='bar' style='height:${Math.max(4,v/max*100)}%'></div>`).join('')}</div><div class='legend-row'><span>${latest7[0].slice(5)}</span><span>${latest7[6].slice(5)}</span></div></div>
-  <details class='fold'><summary>詳しい内訳（教科・教材・ラベル・質）</summary>
+  <details class='fold'><summary>内訳（教科・教材・ラベル・質）</summary>
   ${renderBreakdownCard('教科別', state.subjects.map(s=>[s.name,state.records.filter(r=>r.subjectId===s.id).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderMaterialTotalsCard()}
   ${renderBreakdownCard('ラベル別', state.labels.map(l=>[l.name,state.records.filter(r=>(r.labelIds||[]).includes(l.id)).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   ${renderBreakdownCard('質別', ['S','A','B','C','D'].map(q=>[q,state.records.filter(r=>r.quality===q).reduce((x,r)=>x+(+r.minutes||0),0)]))}
   </details>`;
+  const drawReadout=()=>{
+    const i=selectedBarIndex, v=bars[i];
+    $('#barReadout').innerHTML=`<b>${fmtShort(v)}</b><span class='muted'>${v}分　${fmtMD(latest7[i])}${i===6?' 今日':''}</span>`;
+    document.querySelectorAll('#dashboard .bar-btn').forEach(b=>b.setAttribute('aria-pressed', String(+b.dataset.i===i)));
+    document.querySelectorAll('#dashboard .bar-labels span').forEach(s=>s.classList.toggle('is-selected', +s.dataset.i===i));
+  };
+  document.querySelectorAll('#dashboard .bar-btn').forEach(b=>b.onclick=()=>{ selectedBarIndex=+b.dataset.i; drawReadout(); });
+  drawReadout();
   bindScheduleChecks();
   bindTaskMemo();
   startDashboardClock();
@@ -135,31 +171,50 @@ function renderMaterialTotalsCard(){
     map.set(key,item);
   });
   const rows=[...map.values()].sort((a,b)=>b.minutes-a.minutes);
-  return `<div class='card'><h3>教材別累計</h3>${rows.map(v=>{const m=state.materials.find(x=>x.id===v.materialId); const materialName=m?.name||'教材未選択'; const sid=m?.subjectId||v.subjectId; const sname=subjectName(sid); return `<div class='list-item'><div><b>${escapeHtml(materialName)}</b> / ${escapeHtml(sname)}</div><div class='small'>合計 ${fmtH(v.minutes)}・集中 ${fmtH(v.focus)}・${v.count}回</div><div class='small'>ページ ${v.pages} / 問題 ${v.problems}</div></div>`;}).join('')||'<div class=\"small\">データなし</div>'}</div>`;
+  return `<section class='surface'><div class='surface-head'><h2>教材別</h2></div>${rows.map(v=>{const m=state.materials.find(x=>x.id===v.materialId); const materialName=m?.name||'教材未選択'; const sid=m?.subjectId||v.subjectId; const sname=subjectName(sid); return `<div class='legend-row'><span>${escapeHtml(materialName)} <span class='muted'>${escapeHtml(sname)}</span><br><span class='muted'>${v.count}回　${v.pages}ページ　${v.problems}問</span></span><span>${fmtShort(v.minutes)}<br>集中 ${fmtShort(v.focus)}</span></div>`;}).join('')||'<div class="muted">記録はまだありません</div>'}</section>`;
 }
 function renderBreakdownCard(title,pairs){
   const rows=pairs.filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]); const total=rows.reduce((s,[,v])=>s+v,0)||1;
-  return `<div class='card'><h3>${title}</h3>${rows.map(([k,v])=>`<div class='legend-row'><span>${escapeHtml(k)}</span><span>${fmtH(v)} (${Math.round(v/total*100)}%)</span></div>`).join('')||'<div class="small">データなし</div>'}</div>`;
+  return `<section class='surface'><div class='surface-head'><h2>${title}</h2></div>${rows.map(([k,v])=>`<div class='legend-row'><span>${escapeHtml(k)}</span><span>${fmtShort(v)}　${Math.round(v/total*100)}%</span></div>`).join('')||'<div class="muted">記録はまだありません</div>'}</section>`;
 }
 
+let swTimer=null, swSeconds=0;
 function renderRecordForm(edit=null){
   const r=edit||{date:logicalDateStr(),startTime:'',endTime:nowTime(),minutes:'',subjectId:'',materialId:'',labelIds:[],quality:'A',pages:'',problems:'',memo:''};
   const selectedLabels = new Set(r.labelIds || []);
-  $('#record').innerHTML=`<div class='card'>
-    <h3>${edit?'記録編集':'記録追加'}</h3>
-    <div class='card'><h4>ストップウォッチ</h4><div id='swDisplay' class='value'>00:00:00</div><div class='sw-actions'><button id='swStart' type='button' class='btn small'>開始</button><button id='swStop' type='button' class='btn small'>停止</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div></div>
-    <button id='saveRecordTop' class='btn small primary'>記録を追加</button>
-    <label>メモ</label><textarea id='fMemo'>${escapeHtml(r.memo||'')}</textarea>
-    <div class='row-2'><div><label>日付</label><input id='fDate' type='date' value='${r.date}' /></div><div><label>学習時間</label><input id='fDuration' type='time' value='${fmtHHMM(+r.minutes||0)}' /></div></div>
-    <div class='row-2'><div><label>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
-    <label>質</label><select id='fQuality'>${['S','A','B','C','D'].map(q=>`<option ${q===r.quality?'selected':''}>${q}</option>`).join('')}</select>
-    <label>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select>
-    <label>教材</label><select id='fMaterial'><option value=''>未選択</option></select>
-    <label>ラベル(複数)</label><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' data-id='${l.id}'>${escapeHtml(l.name)}</button>`).join('')}</div>
-    <div class='row'><div><label>ページ数</label><input id='fPages' type='number' value='${r.pages||''}' /></div><div><label>問題数</label><input id='fProblems' type='number' value='${r.problems||''}' /></div></div>
-    <div class='row'><button id='saveRecord' class='btn primary'>保存</button>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}</div>
-  </div>`;
-  let sw=0, timer=null;
+  const mins=+r.minutes||0;
+  const timeUnknown = !!edit && !r.startTime && !r.endTime;
+  setTitle(edit?'記録を編集':'記録を追加');
+  $('#record').innerHTML=`
+  <section class='surface'>
+    <div class='field-group date-dur'>
+      <div class='field'><label for='fDate'>日付</label><input id='fDate' type='date' value='${r.date}' /></div>
+      <div class='field'><span class='field-label' id='durLabel'>学習時間</span><div class='duration' role='group' aria-labelledby='durLabel'><input id='fDurH' type='number' inputmode='numeric' min='0' max='99' step='1' value='${mins?Math.floor(mins/60):''}' placeholder='0' aria-label='時間'/><span>時間</span><input id='fDurM' type='number' inputmode='numeric' min='0' max='59' step='1' value='${mins?mins%60:''}' placeholder='0' aria-label='分'/><span>分</span></div></div>
+    </div>
+    <div class='field-group'>
+      <label class='switch-row' for='fTimeUnknown'><span>時刻がわからない</span><input id='fTimeUnknown' type='checkbox' role='switch' ${timeUnknown?'checked':''}/></label>
+      <div class='row-2' id='timeRange' style='margin-top:8px' ${timeUnknown?'hidden':''}><div><label for='fStart'>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label for='fEnd'>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
+    </div>
+    <div class='field-group'>
+      <div class='pair'>
+      <div class='field'><label for='fSubject'>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
+      <div class='field'><label for='fMaterial'>教材</label><select id='fMaterial'><option value=''>未選択</option></select></div>
+      </div>
+      <div class='field'><span class='field-label' id='qLabel'>質</span><div class='segmented' role='radiogroup' aria-labelledby='qLabel'>${['S','A','B','C','D'].map(q=>`<label><input type='radio' name='fQuality' value='${q}' ${q===(r.quality||'A')?'checked':''}/>${q}</label>`).join('')}</div></div>
+    </div>
+    <div class='field-group'>
+      <span class='field-label'>ラベル</span><div id='labelChips' class='tags'>${state.labels.map(l=>`<button type='button' class='chip ${selectedLabels.has(l.id)?'active':''}' aria-pressed='${selectedLabels.has(l.id)}' data-id='${l.id}'>${escapeHtml(l.name)}</button>`).join('')}</div>
+    </div>
+    <div class='field-group'>
+      <div class='row-2'><div><label for='fPages'>ページ数</label><input id='fPages' type='number' inputmode='numeric' value='${r.pages||''}' /></div><div><label for='fProblems'>問題数</label><input id='fProblems' type='number' inputmode='numeric' value='${r.problems||''}' /></div></div>
+      <div class='field'><label for='fMemo'>メモ</label><textarea id='fMemo'>${escapeHtml(r.memo||'')}</textarea></div>
+    </div>
+  </section>
+  <section class='surface sw'>
+    <div class='sw-head'><h3>ストップウォッチ</h3><span id='swDisplay' class='sw-display'>00:00:00</span></div>
+    <div class='sw-actions'><button id='swToggle' type='button' class='btn small primary'>開始</button><button id='swReset' type='button' class='btn small'>リセット</button><button id='swSet' type='button' class='btn small'>学習時間に反映</button></div>
+  </section>
+  <div class='save-bar'>${edit?"<button id='cancelEdit' class='btn'>キャンセル</button>":''}<button id='saveRecord' class='btn primary'>${edit?'変更を保存':'記録を追加'}</button></div>`;
   // 教科に紐づく教材だけを選択肢に出す（教科未設定の旧教材は全教科で表示）
   const fillMaterials=(preferred='')=>{
     const sid=$('#fSubject').value;
@@ -169,59 +224,123 @@ function renderRecordForm(edit=null){
   };
   fillMaterials(r.materialId);
   $('#fSubject').onchange=()=>fillMaterials($('#fMaterial').value);
-  document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{chip.classList.toggle('active');});
-  const drawSw=()=>{$('#swDisplay').textContent=new Date(sw*1000).toISOString().slice(11,19);};
-  $('#swStart').onclick=()=>{if(timer) return; timer=setInterval(()=>{sw++;drawSw();},1000);};
-  $('#swStop').onclick=()=>{clearInterval(timer); timer=null;};
-  $('#swReset').onclick=()=>{clearInterval(timer); timer=null; sw=0; drawSw();};
-  $('#swSet').onclick=()=>{const total=Math.max(1,Math.round(sw/60)); $('#fDuration').value=fmtHHMM(total); syncTimeFields('duration');};
-  const getMinutes=()=>minFromTime($('#fDuration').value)||0;
-  const setEndFromStart=()=>{const start=$('#fStart').value, mins=getMinutes(); if(!start||!mins) return false; $('#fEnd').value=fmtClock(minFromTime(start)+mins); return true;};
-  const setStartFromEnd=()=>{const end=$('#fEnd').value, mins=getMinutes(); if(!end||!mins) return false; $('#fStart').value=fmtClock(minFromTime(end)-mins); return true;};
-  const setDurationFromRange=()=>{const start=$('#fStart').value, end=$('#fEnd').value; if(!start||!end) return false; const mins=calcMinutesByTime(start,end); if(mins===null) return false; $('#fDuration').value=fmtHHMM(mins); return true;};
-  const syncTimeFields=(source='duration')=>{
-    const hasStart=!!$('#fStart').value, hasEnd=!!$('#fEnd').value, hasDuration=!!getMinutes();
-    if(source==='end'){
-      // 終了を編集した場合は、その値を維持したまま学習時間（なければ開始）を再計算する
-      if(hasStart && hasEnd) return setDurationFromRange();
-      if(hasEnd && hasDuration) return setStartFromEnd();
-      return false;
-    }
-    if(hasStart && hasDuration) return setEndFromStart();
-    if(hasStart && hasEnd) return setDurationFromRange();
-    if(hasEnd && hasDuration) return setStartFromEnd();
-    return false;
+  document.querySelectorAll('#labelChips .chip').forEach(chip => chip.onclick=()=>{ chip.classList.toggle('active'); chip.setAttribute('aria-pressed', String(chip.classList.contains('active'))); });
+
+  // ---- ストップウォッチ ----
+  const drawSw=()=>{ const el=$('#swDisplay'); if(el) el.textContent=new Date(swSeconds*1000).toISOString().slice(11,19); };
+  const setSwRunning=running=>{ const b=$('#swToggle'); b.textContent=running?'停止':(swSeconds?'再開':'開始'); b.classList.toggle('primary', !running); };
+  $('#swToggle').onclick=()=>{
+    if(swTimer){ clearInterval(swTimer); swTimer=null; setSwRunning(false); return; }
+    swTimer=setInterval(()=>{ swSeconds++; drawSw(); },1000); setSwRunning(true);
   };
-  $('#fStart').onchange=()=>syncTimeFields('start'); $('#fEnd').onchange=()=>syncTimeFields('end'); $('#fDuration').onchange=()=>syncTimeFields('duration');
-  const saveHandler=async()=>{syncTimeFields('save'); const rawDate=$('#fDate').value; const normalizedDate=normalizeDateInput(rawDate); if(!normalizedDate) return alert('無効な日付です。YYYY-MM-DD または YYYY/MM/DD 形式で入力してください。'); const totalMinutes=getMinutes(); const data={date:normalizedDate,startTime:$('#fStart').value,endTime:$('#fEnd').value,minutes:totalMinutes,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:$('#fQuality').value,pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()}; if(!data.minutes) return alert('学習時間は必須');
-    if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
+  $('#swReset').onclick=()=>{ clearInterval(swTimer); swTimer=null; swSeconds=0; drawSw(); setSwRunning(false); };
+  $('#swSet').onclick=()=>{ const total=Math.max(1,Math.round(swSeconds/60)); setDuration(total); touch('duration'); };
+  drawSw(); setSwRunning(!!swTimer); // タブを移動してもストップウォッチは止めない
+
+  // ---- 学習時間・開始・終了の連動 ----
+  // 3項目を「最近さわった順」に並べ、値の入った上位2項目を固定して、残りの1項目だけを計算で埋める。
+  // 保存時にも同じ規則で計算するので、最後に手で直した値が上書きされることはない。
+  // 初期の並び: 終了を直すと学習時間が、学習時間を直すと終了が変わる（開始は固定）
+  const getMinutes=()=>{ const h=Math.max(0,Math.floor(+$('#fDurH').value||0)); const m=Math.max(0,Math.floor(+$('#fDurM').value||0)); return h*60+m; };
+  const setDuration=total=>{ const t=Math.max(0,Math.round(total||0)); $('#fDurH').value=Math.floor(t/60); $('#fDurM').value=t%60; };
+  const hasValue=f=>f==='duration'?getMinutes()>0:!!$(f==='start'?'#fStart':'#fEnd').value;
+  let anchors = edit ? ['start','end','duration'] : ['end','start','duration'];
+  const derive=()=>{
+    if($('#fTimeUnknown').checked) return;
+    const fixed=anchors.filter(hasValue).slice(0,2);
+    if(fixed.length<2) return;
+    const target=['start','end','duration'].find(f=>!fixed.includes(f));
+    const start=$('#fStart').value, end=$('#fEnd').value, dur=getMinutes();
+    if(target==='duration') setDuration(calcMinutesByTime(start,end));
+    if(target==='end') $('#fEnd').value=fmtClock(minFromTime(start)+dur);
+    if(target==='start') $('#fStart').value=fmtClock(minFromTime(end)-dur);
+  };
+  const touch=f=>{ anchors=[f, ...anchors.filter(x=>x!==f)]; if(hasValue(f)) derive(); };
+  ['input','change'].forEach(ev=>{
+    $('#fStart').addEventListener(ev,()=>touch('start'));
+    $('#fEnd').addEventListener(ev,()=>touch('end'));
+    $('#fDurH').addEventListener(ev,()=>touch('duration'));
+    $('#fDurM').addEventListener(ev,()=>touch('duration'));
+  });
+  $('#fDurM').addEventListener('change',()=>{ const m=+$('#fDurM').value||0; if(m>59) setDuration(getMinutes()); }); // 「90分」のような入力は 1時間30分 に繰り上げる
+  $('#fTimeUnknown').onchange=()=>{ $('#timeRange').hidden=$('#fTimeUnknown').checked; if(!$('#fTimeUnknown').checked) derive(); };
+
+  const saveHandler=async()=>{
+    const unknown=$('#fTimeUnknown').checked;
+    if(!unknown) derive();
+    const normalizedDate=normalizeDateInput($('#fDate').value);
+    if(!normalizedDate) return alert('日付が正しくありません。日付を選び直してください。');
+    const totalMinutes=getMinutes();
+    if(!totalMinutes) return alert('学習時間を入力してください。');
+    const data={date:normalizedDate,startTime:unknown?'':$('#fStart').value,endTime:unknown?'':$('#fEnd').value,minutes:totalMinutes,subjectId:$('#fSubject').value,materialId:$('#fMaterial').value,labelIds:[...document.querySelectorAll('#labelChips .chip.active')].map(o=>o.dataset.id),quality:document.querySelector("input[name='fQuality']:checked")?.value||'A',pages:+($('#fPages').value||0),problems:+($('#fProblems').value||0),memo:$('#fMemo').value,updatedAt:new Date().toISOString()};
+    const btn=$('#saveRecord'); btn.disabled=true; btn.textContent='保存中…';
+    try{
+      if(edit) await updateDoc(userDoc('studyRecords',edit.id),data); else await addDoc(userCol('studyRecords'),{...data,createdAt:new Date().toISOString()});
+    }catch(err){
+      console.error(err); btn.disabled=false; btn.textContent=edit?'変更を保存':'記録を追加';
+      return alert('保存できませんでした。通信環境を確認して、もう一度お試しください。');
+    }
+    if(!edit){ clearInterval(swTimer); swTimer=null; swSeconds=0; }
     await refresh(); switchScreen('list');
   };
   $('#saveRecord').onclick=saveHandler;
-  $('#saveRecordTop').onclick=saveHandler;
-  if(edit) $('#cancelEdit').onclick=()=>renderRecordForm();
+  if(edit) $('#cancelEdit').onclick=()=>switchScreen('list');
 }
 
+let listMenuBound=false;
 function renderList(){
-  $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><div class='card'><div class='row'><input id='fltDate' type='date'/><select id='fltSubject'><option value=''>教科全て</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class='row'><select id='fltQuality'><option value=''>質全て</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`)}</select><select id='fltLabel'><option value=''>ラベル全て</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></details><div id='recordsWrap'></div>`;
+  $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
     const rows=state.records.filter(r=>(!d||r.date===d)&&(!s||r.subjectId===s)&&(!q||r.quality===q)&&(!l||(r.labelIds||[]).includes(l))).sort((a,b)=>`${b.date} ${b.endTime||''}`.localeCompare(`${a.date} ${a.endTime||''}`));
-    $('#recordsWrap').innerHTML=rows.map(r=>`<div class='tl-item'>
-      <div class='tl-head'><span class='tl-title'>${escapeHtml(subjectName(r.subjectId))}${materialName(r.materialId)?` <span class='tl-material'>${escapeHtml(materialName(r.materialId))}</span>`:''}</span><span class='tl-time'>${r.date.slice(5).replace('-','/')} ${r.startTime||''}${r.startTime||r.endTime?'–':''}${r.endTime||''}</span></div>
-      <div class='tl-meta'>${fmtH(r.minutes)}・集中${fmtH(focusMinutes(r))}・質${r.quality}${(r.labelIds||[]).map(id=>` <span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
-      ${r.memo?`<div class='tl-memo'>${escapeHtml(r.memo)}</div>`:''}
-      <div class='tl-actions'><button class='link-btn edit' data-id='${r.id}'>編集</button><button class='link-btn danger del' data-id='${r.id}'>削除</button></div>
-    </div>`).join('')||'<div class="card small">まだ記録がありません</div>';
-    document.querySelectorAll('.edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
-    document.querySelectorAll('.del').forEach(b=>b.onclick=async()=>{if(confirm('削除しますか？')){await deleteDoc(userDoc('studyRecords',b.dataset.id)); await refresh();}});
+    const today=logicalDateStr(), yest=addDays(today,-1);
+    const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
+    const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
+      return `<article class='post' data-id='${r.id}'>
+      <div class='avatar' aria-hidden='true'>${escapeHtml(sub.slice(0,1))}</div>
+      <div class='post-body'>
+        <div class='post-head'><b class='post-name'>${escapeHtml(sub)}</b>${mat?`<span class='post-sub'>${escapeHtml(mat)}</span>`:''}<time class='post-time' datetime='${r.date}'>${dayLabel(r.date)}${t?` ${t}`:''}</time><button class='post-more' data-id='${r.id}' aria-label='この記録の操作' aria-haspopup='menu' aria-expanded='false'>${ICON_MORE}</button></div>
+        ${r.memo?`<p class='post-text'>${escapeHtml(r.memo)}</p>`:''}
+        <div class='post-stats'><span class='post-big'>${fmtShort(r.minutes)}</span><span>${r.startTime||r.endTime?`${r.startTime||'?'}–${r.endTime||'?'}`:'時刻不明'}</span><span>集中 ${fmtShort(focusMinutes(r))}</span><span>質${escapeHtml(r.quality||'')}</span>${(r.labelIds||[]).map(id=>`<span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
+      </div>
+    </article>`; };
+    $('#recordsWrap').innerHTML=rows.length?`<div class='feed'>${rows.map(post).join('')}</div>`
+      :`<section class='surface empty-state'>${state.records.length?'条件に合う記録はありません':'まだ記録がありません'}</section>`;
+    const editRecord=id=>{ switchScreen('record'); renderRecordForm(state.records.find(x=>x.id===id)); };
+    const deleteRecord=async id=>{ if(confirm('この記録を削除しますか？')){ await deleteDoc(userDoc('studyRecords',id)); await refresh(); } };
+    const closeMenu=()=>{ document.querySelectorAll('.post-menu').forEach(m=>m.remove()); document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); };
+    const openMenu=(postEl)=>{
+      closeMenu();
+      const id=postEl.dataset.id, btn=postEl.querySelector('.post-more');
+      const menu=document.createElement('div'); menu.className='post-menu'; menu.setAttribute('role','menu');
+      menu.innerHTML=`<button role='menuitem' class='pm-edit'>${ICON_EDIT}編集</button><button role='menuitem' class='pm-del danger'>${ICON_TRASH}削除</button>`;
+      postEl.append(menu); btn.setAttribute('aria-expanded','true');
+      // 画面下にはみ出すときは上に開く
+      const r=menu.getBoundingClientRect(); if(r.bottom>window.innerHeight-90) menu.classList.add('up');
+      menu.querySelector('.pm-edit').onclick=()=>{ closeMenu(); editRecord(id); };
+      menu.querySelector('.pm-del').onclick=()=>{ closeMenu(); deleteRecord(id); };
+      menu.querySelector('button').focus();
+    };
+    document.querySelectorAll('#recordsWrap .post').forEach(p=>{
+      p.querySelector('.post-more').onclick=e=>{ e.stopPropagation(); p.querySelector('.post-menu')?closeMenu():openMenu(p); };
+      // 長押しでも開く（指が動いたらスクロールとみなしてやめる）
+      let timer=null, sx=0, sy=0;
+      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
+      p.addEventListener('touchmove',e=>{ const t=e.touches[0]; if(timer&&(Math.abs(t.clientX-sx)>8||Math.abs(t.clientY-sy)>8)){ clearTimeout(timer); timer=null; } },{passive:true});
+      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,()=>{ if(timer){ clearTimeout(timer); timer=null; } }));
+      p.addEventListener('contextmenu',e=>{ if(e.target.closest('.post-menu')) return; e.preventDefault(); openMenu(p); });
+    });
+    if(!listMenuBound){ listMenuBound=true;
+      document.addEventListener('click',e=>{ if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
+      document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const open=document.querySelector('.post-menu'); if(open){ const b=open.closest('.post')?.querySelector('.post-more'); open.remove(); b?.setAttribute('aria-expanded','false'); b?.focus(); } } });
+    }
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
 }
 const subjectName=id=>state.subjects.find(x=>x.id===id)?.name||'未設定';
 const materialName=id=>state.materials.find(x=>x.id===id)?.name||'';
 const labelName=id=>state.labels.find(x=>x.id===id)?.name||'不明';
 
-function renderManageHtml(){ return `<div class='card'><button class='btn' id='backSettings'>← 設定へ戻る</button>${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}</div>`; }
-function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<h3>${title}</h3><div class='row'>${hasSubject?`<select id='new-${key}-subject'>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select>`:''}<input id='new-${key}-name' placeholder='${title}名'/><button class='btn add' data-key='${key}'>追加</button></div>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${i.color?`<span class='inline-dot' style='background:${i.color}'></span>`:''}${escapeHtml(i.name)}${hasSubject?`<span class='small'>　${escapeHtml(subjectName(i.subjectId))}</span>`:''}</span><div class='row'><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='up' ${idx===0?'disabled':''}>↑</button><button class='btn small move' data-key='${key}' data-id='${i.id}' data-dir='down' ${idx===items.length-1?'disabled':''}>↓</button><button class='btn small editm' data-key='${key}' data-id='${i.id}'>編集</button><button class='btn small danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}`; }
+function renderManageHtml(){ return `${settingsBackHtml('教科・教材・ラベル')}${managerBlock('教科','subjects',state.subjects,false)}${managerBlock('教材','materials',state.materials,false,true)}${managerBlock('ラベル','labels',state.labels,false)}`; }
+function managerBlock(title,key,items,hasColor=false,hasSubject=false){ return `<section class='surface'><div class='surface-head'><h2>${title}</h2><span class='muted'>${items.length}件</span></div><div class='row'>${hasSubject?`<select id='new-${key}-subject' aria-label='所属する教科'>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select>`:''}<input id='new-${key}-name' placeholder='${title}名' aria-label='新しい${title}名'/><button class='btn add' data-key='${key}'>追加</button></div><div style='margin-top:8px'>${items.map((i,idx)=>`<div class='list-item' data-item-id='${i.id}'><span>${escapeHtml(i.name)}${hasSubject?`<span class='muted'>　${escapeHtml(subjectName(i.subjectId))}</span>`:''}</span><div class='item-actions'><button class='icon-btn move' data-key='${key}' data-id='${i.id}' data-dir='up' aria-label='上へ' ${idx===0?'disabled':''}>${ICON_UP}</button><button class='icon-btn move' data-key='${key}' data-id='${i.id}' data-dir='down' aria-label='下へ' ${idx===items.length-1?'disabled':''}>${ICON_DOWN}</button><button class='link-btn editm' data-key='${key}' data-id='${i.id}'>編集</button><button class='link-btn danger delm' data-key='${key}' data-id='${i.id}'>削除</button></div></div>`).join('')}</div></section>`; }
 function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const name=$(`#new-${key}-name`).value.trim(); if(!name)return; const list = key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const base={name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),order:list.length}; if(key==='materials') base.subjectId=$('#new-materials-subject').value; if(key!=='materials') base.color='#26c6da'; await addDoc(userCol(key),base); await refresh(); switchScreen('settings'); renderSettings('manage');});
   document.querySelectorAll('.delm').forEach(b=>b.onclick=async()=>{if(confirm('関連記録がある可能性があります。削除しますか？')){await deleteDoc(userDoc(b.dataset.key,b.dataset.id)); await refresh();}});
   document.querySelectorAll('.move').forEach(b=>b.onclick=async()=>{const key=b.dataset.key; const arr=key==='subjects'?state.subjects:(key==='materials'?state.materials:state.labels); const i=arr.findIndex(x=>x.id===b.dataset.id); const j=b.dataset.dir==='up'?i-1:i+1; if(i<0||j<0||j>=arr.length) return; const a=arr[i], c=arr[j]; await updateDoc(userDoc(key,a.id),{order:j,updatedAt:new Date().toISOString()}); await updateDoc(userDoc(key,c.id),{order:i,updatedAt:new Date().toISOString()}); await refresh(); renderSettings('manage');});
@@ -246,22 +365,24 @@ function bindManager(){ document.querySelectorAll('.add').forEach(b=>b.onclick=a
     };
     rowEl.querySelector('.cancel-edit').onclick=()=>renderSettings('manage');
   });
-  $('#backSettings').onclick=()=>renderSettings();
+  bindSettingsBack();
 }
 function renderGoals(){ const a=aggregate(); const baseDate=logicalDateStr(); if(!state.calendarMonth) state.calendarMonth = baseDate.slice(0,7); const pct=state.weekGoal?Math.min(100,Math.round(a.week/state.weekGoal*100)):0;
+const upcoming=state.tests.filter(t=>t.date>=baseDate);
+const g=state.weekGoal||0;
 $('#goals').innerHTML=`
-<div class='card'><h3>今週の進み具合</h3>
-  ${state.weekGoal?`<div class='progress-wrap'><div class='legend-row'><span>${fmtH(a.week)} / 目標 ${fmtH(state.weekGoal)}</span><span>${pct}%</span></div><div class='progress'><div class='progress-fill' style='width:${pct}%'></div></div></div>`:`<div class='small'>週目標が未設定です。下の「設定」から登録できます。</div>`}
-</div>
+<section class='surface'><div class='surface-head'><h2>今週</h2></div>
+  ${state.weekGoal?`<div class='meter-row'><span><b>${fmtShort(a.week)}</b> / 目標 ${fmtShort(state.weekGoal)}</span><b>${pct}%</b></div><div class='progress' role='progressbar' aria-valuemin='0' aria-valuemax='100' aria-valuenow='${pct}' aria-label='今週の目標の達成率'><div class='progress-fill' style='width:${pct}%'></div></div>`:`<div class='meter-row'><span><b>${fmtShort(a.week)}</b></span><span>週目標は未設定です</span></div>`}
+</section>
+${upcoming.length?`<section class='surface'><div class='surface-head'><h2>テストまで</h2></div>${upcoming.map(t=>`<div class='legend-row'><span>${escapeHtml(t.name)}<br><span class='muted'>${fmtMD(t.date)}</span></span><span><b style='font-size:var(--fs-title);color:var(--ink)'>${Math.max(0,Math.ceil((parseDateStr(t.date)-parseDateStr(baseDate))/86400000))}</b> 日</span></div>`).join('')}</section>`:''}
 ${renderCalendarCard()}
-${state.tests.filter(t=>t.date>=baseDate).length?`<div class='card'><h3>テストまで</h3>${state.tests.filter(t=>t.date>=baseDate).map(t=>`<div class='legend-row'><span>${escapeHtml(t.name)}</span><span><b>あと${Math.max(0,Math.ceil((new Date(t.date)-new Date(baseDate))/86400000))}日</b>　<span class='small'>${t.date}</span></span></div>`).join('')}</div>`:''}
-<details class='fold'><summary>設定（週目標・テスト・タスク・期間）</summary>
-  <div class='card'><h4>今週の目標時間</h4><input id='goalDuration' type='time' value='${fmtHHMM(state.weekGoal||0)}'/><button id='saveGoal' class='btn primary small' style='margin-top:8px'>保存</button></div>
-  <div class='card'><h4>テスト登録</h4><input id='testName' placeholder='テスト名'/><label>日付</label><input id='testDate' type='date'/><label>メモ</label><textarea id='testMemo' placeholder='メモ'></textarea><button id='addTest' class='btn small' style='margin-top:8px'>追加</button>${state.tests.map(t=>`<div class='list-item'><span>${escapeHtml(t.name)} <span class='small'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div>
+<details class='fold'><summary>週目標・テスト・タスク・期間の設定</summary>
+  <section class='surface'><h3 style='margin-bottom:12px'>今週の目標時間</h3><div class='duration'><input id='goalH' type='number' inputmode='numeric' min='0' step='1' value='${g?Math.floor(g/60):''}' placeholder='0' aria-label='時間'/><span>時間</span><input id='goalM' type='number' inputmode='numeric' min='0' max='59' step='1' value='${g?g%60:''}' placeholder='0' aria-label='分'/><span>分</span></div><button id='saveGoal' class='btn primary small' style='margin-top:12px'>保存</button></section>
+  <section class='surface'><h3 style='margin-bottom:12px'>テスト</h3><div class='field'><label for='testName'>テスト名</label><input id='testName'/></div><div class='field'><label for='testDate'>日付</label><input id='testDate' type='date'/></div><div class='field'><label for='testMemo'>メモ</label><textarea id='testMemo'></textarea></div><button id='addTest' class='btn small' style='margin-top:12px'>追加</button><div style='margin-top:8px'>${state.tests.map(t=>`<div class='list-item'><span>${escapeHtml(t.name)} <span class='muted'>${t.date}</span></span><button class='link-btn danger deltest' data-id='${t.id}'>削除</button></div>`).join('')}</div></section>
   ${scheduleSettingsHtml()}
 </details>`;
 bindScheduleSettings();
-$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=minFromTime($('#goalDuration').value)||0; const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
+$('#saveGoal').onclick=async()=>{const weekStartDate=mondayOf(logicalNow()); const targetMinutes=Math.max(0,Math.floor(+$('#goalH').value||0))*60+Math.max(0,Math.floor(+$('#goalM').value||0)); const g=(await getDocs(query(userCol('weeklyGoals')))).docs.map(d=>({id:d.id,...d.data()})).find(x=>x.weekStartDate===weekStartDate); if(g) await updateDoc(userDoc('weeklyGoals',g.id),{targetMinutes,updatedAt:new Date().toISOString()}); else await addDoc(userCol('weeklyGoals'),{weekStartDate,targetMinutes,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 $('#addTest').onclick=async()=>{const name=$('#testName').value.trim(), date=$('#testDate').value; if(!name||!normalizeDateInput(date)) return alert('テスト名と日付を入力してください。'); await addDoc(userCol('tests'),{name,date,memo:$('#testMemo').value,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}); await refresh();};
 document.querySelectorAll('.deltest').forEach(b=>b.onclick=async()=>{await deleteDoc(userDoc('tests',b.dataset.id)); await refresh();});
 $('#calPrev').onclick=()=>{const [y,m]=state.calendarMonth.split('-').map(Number); const d=new Date(y,m-2,1); state.calendarMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderGoals();};
@@ -273,14 +394,15 @@ function renderCalendarCard(){
   const [y,m]=state.calendarMonth.split('-').map(Number); const first=new Date(y,m-1,1); const startDay=first.getDay(); const days=new Date(y,m,0).getDate();
   const dayMap={}; state.records.forEach(r=>{if(!r.date?.startsWith(state.calendarMonth)) return; dayMap[r.date]=(dayMap[r.date]||{minutes:0,focus:0,records:[]}); dayMap[r.date].minutes+=(+r.minutes||0); dayMap[r.date].focus+=focusMinutes(r); dayMap[r.date].records.push(r);});
   const studiedDays=Object.keys(dayMap).length; const monthMinutes=Object.values(dayMap).reduce((s,v)=>s+v.minutes,0); const monthFocus=Object.values(dayMap).reduce((s,v)=>s+v.focus,0);
-  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=lv===1?'•':lv===2?'✓':''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
-  return `<div class='card'><h3>カレンダー</h3><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前月'>‹</button><button type='button' class='cal-nav-label' id='calToday'>${state.calendarMonth}</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次月'>›</button></div><div class='cal-week'>${['日','月','火','水','木','金','土'].map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='small'>学習日数 ${studiedDays}日 / 合計 ${fmtH(monthMinutes)} / 集中 ${fmtH(monthFocus)}${state.schedulePeriods?.length?' ・ <span class="in-period-dot"></span> 期間中の日':''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></div>`;
+  const cells=[]; for(let i=0;i<startDay;i++) cells.push(`<div class='cal-cell empty'></div>`); for(let d=1;d<=days;d++){const date=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const info=dayMap[date]; const min=info?.minutes||0; const lv=min>=120?4:min>=60?3:min>=30?2:min>=1?1:0; const marker=''; const inPeriod=!!findActivePeriod(date); cells.push(`<button type='button' aria-label='${m}月${d}日 ${fmtShort(min)}' class='cal-cell studied-${lv} ${date===logicalDateStr()?'today':''} ${info?'studied':''} ${inPeriod?'in-period':''} ${date===state.selectedDate?'selected':''}' data-date='${date}'><span>${d}</span><small>${marker}</small></button>`);}
+  const [cy,cm]=state.calendarMonth.split('-').map(Number);
+  return `<section class='surface'><div class='cal-nav'><button type='button' class='cal-nav-btn' id='calPrev' aria-label='前の月'>${ICON_BACK}</button><button type='button' class='cal-nav-label' id='calToday' aria-label='今月に戻る'>${cy}年${cm}月</button><button type='button' class='cal-nav-btn' id='calNext' aria-label='次の月'>${ICON_CHEV.replace("class='ico chev'","class='ico'")}</button></div><div class='cal-week'>${WEEKDAYS.map(v=>`<div>${v}</div>`).join('')}</div><div class='cal-grid'>${cells.join('')}</div><div class='cal-legend'><span>学習日数 <b>${studiedDays}日</b></span><span>合計 <b>${fmtShort(monthMinutes)}</b></span><span>集中 <b>${fmtShort(monthFocus)}</b></span>${state.schedulePeriods?.length?`<span><span class='in-period-dot'></span>期間中</span>`:''}</div><div id='calDayRecords'>${renderCalendarDayRecords(dayMap[state.selectedDate], state.selectedDate)}${renderCalendarDayTasks(state.selectedDate)}</div></section>`;
 }
 
 function renderCalendarDayRecords(dayInfo,date){
-  if(!date) return `<div class='small'>日付をタップするとその日の記録とタスク達成状況を表示します。</div>`;
-  if(!dayInfo) return `<h4>${date}</h4><div class='small'>この日の学習記録はありません。</div>`;
-  return `<h4>${date}</h4><div class='small' style='margin-bottom:6px'>合計 ${fmtH(dayInfo.minutes)}・集中 ${fmtH(dayInfo.focus)}</div>${dayInfo.records.map(r=>`<div class='list-item'>${escapeHtml(subjectName(r.subjectId))} / ${escapeHtml(materialName(r.materialId)||'教材未選択')} / ${r.minutes}分 / 質${escapeHtml(r.quality)}<div class='small'>${escapeHtml(r.memo||'')}</div></div>`).join('')}`;
+  if(!date) return '';
+  if(!dayInfo) return `<h4>${fmtMD(date)}</h4><div class='muted'>学習記録はありません</div>`;
+  return `<h4>${fmtMD(date)}</h4><div class='muted tabnum' style='margin-bottom:4px'>合計 ${fmtShort(dayInfo.minutes)}　集中 ${fmtShort(dayInfo.focus)}</div>${dayInfo.records.map(r=>`<div class='list-item'><span>${escapeHtml(subjectName(r.subjectId))} <span class='muted'>${escapeHtml(materialName(r.materialId)||'教材未選択')}</span>${r.memo?`<br><span class='muted'>${escapeHtml(r.memo)}</span>`:''}</span><span class='tabnum'>${r.minutes}分 <span class='muted'>質${escapeHtml(r.quality)}</span></span></div>`).join('')}`;
 }
 function renderCalendarDayTasks(date){
   if(!date || !state.schedule?.startDate || date<state.schedule.startDate) return '';
@@ -288,7 +410,7 @@ function renderCalendarDayTasks(date){
   const tasks=d?d.tasks:effectiveTasksFor(date);
   if(!tasks.length) return '';
   const done=d?(d.done||{}):{};
-  return `<h4 style='margin-top:12px'>${date} のタスク</h4>${tasks.map(t=>`<div class='legend-row'><span>${done[t.id]?'✓':'・'} ${escapeHtml(t.text)}</span></div>`).join('')}`;
+  return `<h4 style='margin-top:16px'>タスク <span class='muted'>${tasks.filter(t=>done[t.id]).length}/${tasks.length}</span></h4>${tasks.map(t=>`<div class='legend-row'><span>${escapeHtml(t.text)}</span><span>${done[t.id]?'完了':'未完了'}</span></div>`).join('')}`;
 }
 
 // ---- スケジュール（通年ベース + 季節ごとの期間上書き） ----
@@ -383,26 +505,26 @@ function tasksCardHtml(){
   const doneCount=tasks.filter(t=>done[t.id]).length;
   const activePeriod=findActivePeriod(today);
   const emptyMsg=activePeriod
-    ?`「${escapeHtml(activePeriod.name)}」期間のタスクが未登録です。目標タブ下部の設定から追加してください。`
-    :'タスクが未登録です。目標タブ下部の設定から追加してください。';
-  const carryNote=carry.length?`${carry[0].date}分の繰り越し${carry.length}件 ・ `:'';
-  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''}/><span>${escapeHtml(t.text)}</span><span class='tag tag-carry'>繰り越し</span></label>`).join('');
+    ?`「${escapeHtml(activePeriod.name)}」期間のタスクはまだありません。目標タブの設定から追加できます。`
+    :'タスクはまだありません。目標タブの設定から追加できます。';
+  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''}/><span>${escapeHtml(t.text)}</span><span class='tag'>${fmtMD(t.date).replace(/\(.\)$/,'')}の分</span></label>`).join('');
   const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
-  return `<div class='card'>
-    <h3>今日のタスク <span class='small'>${carryNote}${activePeriod?`${escapeHtml(activePeriod.name)}期間 ・ `:''}${tasks.length?`${doneCount}/${tasks.length} 完了`:''}</span></h3>
+  return `<section class='surface'>
+    <div class='surface-head'><h2>今日のタスク</h2><span class='muted tabnum'>${tasks.length?`${doneCount}/${tasks.length}`:''}</span></div>
+    ${activePeriod||carry.length?`<div class='muted' style='margin:-8px 0 4px'>${activePeriod?`${escapeHtml(activePeriod.name)}の期間中`:''}${activePeriod&&carry.length?'　':''}${carry.length?`前日からの繰り越し ${carry.length}件`:''}</div>`:''}
     ${carryRows}
-    ${tasks.length===0?`<div class='small'>${emptyMsg}</div>`:todayRows}
-  </div>`;
+    ${tasks.length===0?`<div class='muted' style='padding:8px 0'>${emptyMsg}</div>`:todayRows}
+  </section>`;
 }
 function taskMemoHtml(){
-  return `<div class='card'><h4>タスクメモ</h4><textarea id='taskMemoInput' placeholder='自由にメモを書けます'>${escapeHtml(state.taskMemo||'')}</textarea><button id='saveTaskMemo' class='btn small' style='margin-top:8px'>保存</button></div>`;
+  return `<section class='surface'><div class='surface-head'><h2 id='memoTitle'>メモ</h2><button id='saveTaskMemo' class='link-btn'>保存</button></div><textarea id='taskMemoInput' aria-labelledby='memoTitle'>${escapeHtml(state.taskMemo||'')}</textarea></section>`;
 }
 function bindTaskMemo(){
   $('#saveTaskMemo').onclick=async()=>{
     const taskMemo=$('#taskMemoInput').value;
     await setDoc(doc(db,`users/${state.uid}/settings/main`),{taskMemo},{merge:true});
     state.taskMemo=taskMemo;
-    alert('保存しました');
+    const b=$('#saveTaskMemo'); if(b){ b.textContent='保存しました'; setTimeout(()=>{ if($('#saveTaskMemo')) $('#saveTaskMemo').textContent='保存'; },1600); }
   };
 }
 function bindScheduleChecks(){
@@ -417,37 +539,36 @@ function bindScheduleChecks(){
   });
 }
 function periodManagerHtml(p){
-  return `<div class='card'>
-    <div class='row'><b>${escapeHtml(p.name)}</b><button class='link-btn danger delPeriod' data-id='${p.id}'>期間を削除</button></div>
-    <div class='small'>${p.startDate} 〜 ${p.endDate}</div>
-    <div class='row'><input id='pNewTask-${p.id}' placeholder='タスク名'/><button class='btn small addPeriodTask' data-id='${p.id}'>追加</button></div>
-    ${(p.tasks||[]).map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
-  </div>`;
+  return `<section class='surface'>
+    <div class='surface-head'><h3>${escapeHtml(p.name)} <span class='muted'>${fmtMD(p.startDate)}〜${fmtMD(p.endDate)}</span></h3><button class='link-btn danger delPeriod' data-id='${p.id}'>期間を削除</button></div>
+    <div class='row'><input id='pNewTask-${p.id}' placeholder='タスク名' aria-label='${attr(p.name)}のタスク名'/><button class='btn small addPeriodTask' data-id='${p.id}'>追加</button></div>
+    <div style='margin-top:8px'>${(p.tasks||[]).map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delPeriodTask' data-pid='${p.id}' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="muted">タスクはまだありません</div>'}</div>
+  </section>`;
 }
 function scheduleSettingsHtml(){
   const {startDate=''}=state.schedule||{};
   const defaultTasks=state.schedule?.defaultTasks||[];
   const periods=state.schedulePeriods||[];
   return `
-    <div class='card'>
-      <h4>タスクのトラッキング開始日</h4>
-      <input id='schStart' type='date' value='${startDate}'/>
-      <button id='schSaveStart' class='btn primary small' style='margin-top:8px'>開始日を保存</button>
-      ${startDate?'':'<div class="small" style="margin-top:6px">開始日を設定するとホームに今日のタスクが表示されます。</div>'}
-    </div>
-    <div class='card'>
-      <h4>毎日のデフォルトタスク</h4>
-      <div class='row'><input id='schNewTask' placeholder='タスク名（例: 単語100個）'/><button id='schAddTask' class='btn small'>追加</button></div>
-      ${defaultTasks.length===0?`<button id='schUseTemplate' class='btn small'>例テンプレートを使う</button>`:''}
-      ${defaultTasks.map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="small">タスク未登録</div>'}
-    </div>
-    <div class='card'>
-      <h4>期間（季節ごとの上書き）</h4>
-      <div class='small'>期間中は通年のデフォルトタスクに加えて、その期間専用のタスクも追加されます（例: 夏休み・冬休み）。</div>
-      <label>期間名</label><input id='pName' placeholder='例: 夏休み'/>
-      <div class='row'><div><label>開始日</label><input id='pStart' type='date'/></div><div><label>終了日</label><input id='pEnd' type='date'/></div></div>
-      <button id='addPeriod' class='btn small' style='margin-top:8px'>期間を追加</button>
-    </div>
+    <section class='surface'>
+      <h3 id='schStartTitle' style='margin-bottom:12px'>タスクの記録開始日</h3>
+      <input id='schStart' aria-labelledby='schStartTitle' type='date' value='${startDate}'/>
+      ${startDate?'':'<p class="small" style="margin:8px 0 0">開始日を設定すると、ホームに今日のタスクが表示されます。</p>'}
+      <button id='schSaveStart' class='btn primary small' style='margin-top:12px'>開始日を保存</button>
+    </section>
+    <section class='surface'>
+      <h3 style='margin-bottom:12px'>毎日のタスク</h3>
+      <div class='row'><input id='schNewTask' placeholder='例: 単語100個' aria-label='毎日のタスク名'/><button id='schAddTask' class='btn small'>追加</button></div>
+      ${defaultTasks.length===0?`<button id='schUseTemplate' class='btn small' style='margin-top:8px'>例のタスクを入れる</button>`:''}
+      <div style='margin-top:8px'>${defaultTasks.map(t=>`<div class='list-item'><span>${escapeHtml(t.text)}</span><button class='link-btn danger delSchTask' data-id='${t.id}'>削除</button></div>`).join('')||'<div class="muted">タスクはまだありません</div>'}</div>
+    </section>
+    <section class='surface'>
+      <h3 style='margin-bottom:4px'>期間</h3>
+      <p class='small' style='margin:0 0 12px'>期間中は、毎日のタスクにその期間だけのタスクが加わります。</p>
+      <div class='field'><label for='pName'>期間名</label><input id='pName' placeholder='例: 夏休み'/></div>
+      <div class='row-2' style='margin-top:16px'><div><label for='pStart'>開始日</label><input id='pStart' type='date'/></div><div><label for='pEnd'>終了日</label><input id='pEnd' type='date'/></div></div>
+      <button id='addPeriod' class='btn small' style='margin-top:12px'>期間を追加</button>
+    </section>
     ${periods.map(periodManagerHtml).join('')}`;
 }
 function bindScheduleSettings(){
@@ -499,9 +620,6 @@ function formatNowDateTime(){
   const weekday=['日','月','火','水','木','金','土'][now.getDay()];
   return `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日(${weekday}) ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
 }
-function nowDateTimeHtml(){
-  return `<div class='card small' style='text-align:center'><span id='nowClock'>${formatNowDateTime()}</span><div class='small' style='margin-top:4px'>学習記録上の「1日」は深夜4:00で区切られます</div></div>`;
-}
 let clockInterval=null;
 function startDashboardClock(){
   if(clockInterval) clearInterval(clockInterval);
@@ -511,10 +629,15 @@ function startDashboardClock(){
     el.textContent=formatNowDateTime();
   }, 15000);
 }
-function renderScheduleStreakCard(){
+function streakHtml(){
   if(!state.schedule?.startDate) return '';
   const s=computeScheduleStreak();
-  return `<div class='card'><h3>学習ストリーク</h3><div class='streak-big ${s.current>0?'':'streak-zero'}'>${s.current}<span class='unit'>日連続</span></div>${s.broken?`<div class='streak-broken'>${s.broken.date} に ${s.broken.length}日 のストリークが途切れました</div>`:''}</div>`;
+  return `<div class='hero-streak ${s.current>0?'':'zero'}'><div class='hero-label'>連続</div><div class='hero-streak-value'>${s.current}<span class='unit'>日</span></div></div>`;
+}
+function streakBrokenHtml(){
+  if(!state.schedule?.startDate) return '';
+  const s=computeScheduleStreak();
+  return s.broken?`<div class='streak-broken'>${fmtMD(s.broken.date)}に ${s.broken.length}日の連続が途切れました</div>`:'';
 }
 
 // ---- 通知（アプリを開いた時に「今日のタスク」をローカル通知） ----
@@ -602,29 +725,85 @@ async function sendTestPush(){
   } catch (err) { console.error('sendTestPush failed:', err); alert(`送信に失敗しました: ${err.message || err}`); }
 }
 
-function renderSettings(mode='menu'){ if(mode==='manage'){ $('#settings').innerHTML=renderManageHtml(); bindManager(); return; } $('#settings').innerHTML=`<div class='card small'>ログイン中: <b>${escapeHtml(state.userName||state.userEmail||'不明')}</b>${state.userName&&state.userEmail?`<br>${escapeHtml(state.userEmail)}`:''}</div><div class='card menu-card'><h3>設定メニュー</h3>
-  <button class='menu-row' id='openManage'><span>教科・教材・ラベル管理</span><span class='chev'>›</span></button>
-  <button class='menu-row' id='openBackup'><span>バックアップ</span><span class='chev'>›</span></button>
-  <button class='menu-row' id='openQuality'><span>質係数</span><span class='chev'>›</span></button>
-  <button class='menu-row' id='openNotify'><span>通知設定</span><span class='chev'>›</span></button>
-  </div><div class='card' id='settingsPanel'></div><div class='card small'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</div><button id='settingsLogout' class='btn danger' style='width:100%'>ログアウト</button>`;
-$('#settingsPanel').innerHTML = `<h3>質係数</h3>${['S','A','B','C','D'].map(k=>`<label>${k}</label><input id='q-${k}' type='number' step='0.01' value='${state.quality[k]}'/>`).join('')}<button id='saveQ' class='btn primary'>保存</button>`;
-$('#openManage').onclick=()=>renderSettings('manage');
-$('#openBackup').onclick=()=>$('#settingsPanel').innerHTML=`<h3>バックアップ</h3><button id='exp' class='btn'>JSONエクスポート</button><input id='impFile' type='file' accept='application/json'/><button id='imp' class='btn'>JSONインポート</button><button id='wipe' class='btn danger'>全データ削除</button>`;
-$('#openQuality').onclick=()=>renderSettings();
-$('#openNotify').onclick=()=>{
-  $('#settingsPanel').innerHTML=`<h3>通知</h3><div class='small'>アプリを開いたときに「今日のタスク」を端末通知でお知らせします。ブラウザ/OSの仕様上、アプリを閉じている間の確実な自動通知はできません。</div><div>許可状態: <b id='notifyStatus'></b></div><label>通知する時刻</label><input id='notifyHourInput' type='time' value='${notifyTimeStr()}'/><div class='row'><button id='notifyEnable' class='btn primary small'>通知を許可する</button><button id='notifySave' class='btn small'>時刻を保存</button></div><div class='small' style='margin-top:12px'>アプリを閉じていても届くプッシュ通知（要デプロイ・テスト送信用）</div><div>プッシュ登録状態: <b id='pushStatus'></b></div><div class='row'><button id='pushRegister' class='btn small'>プッシュ通知を登録</button><button id='pushTest' class='btn small'>テスト通知を送信</button><button id='pushUnregister' class='btn danger small'>登録解除</button></div>`;
-  $('#notifyStatus').textContent=('Notification' in window)?Notification.permission:'非対応';
-  $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); const p=await Notification.requestPermission(); $('#notifyStatus').textContent=p; };
-  $('#notifySave').onclick=()=>{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'07:00'); alert('保存しました'); };
-  refreshPushStatus();
-  $('#pushRegister').onclick=registerPush;
-  $('#pushTest').onclick=sendTestPush;
-  $('#pushUnregister').onclick=unregisterPush;
-};
-$('#settingsLogout').onclick=()=>signOut(auth);
-$('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
-bindSettingsPanelActions(); }
+function settingsBackHtml(title){ return `<button type='button' class='back-btn' id='backSettings'>${ICON_BACK}設定</button><h2 style='margin:0 4px 16px'>${title}</h2>`; }
+function bindSettingsBack(){ const b=$('#backSettings'); if(b) b.onclick=()=>renderSettings('menu'); }
+function notifyPermissionLabel(){
+  if(!('Notification' in window)) return '非対応';
+  return {granted:'許可済み',denied:'拒否',default:'未設定'}[Notification.permission]||Notification.permission;
+}
+function menuRow(id,label,value=''){ return `<button class='menu-row' id='${id}'><span>${label}</span>${value?`<span class='value'>${value}</span>`:''}${ICON_CHEV}</button>`; }
+function renderSettings(mode=state.settingsMode||'menu'){
+  state.settingsMode=mode;
+  const el=$('#settings');
+  if(mode==='manage'){ el.innerHTML=renderManageHtml(); bindManager(); return; }
+  if(mode==='quality'){
+    el.innerHTML=`${settingsBackHtml('質係数')}
+    <section class='surface'><div class='quality-grid'>${['S','A','B','C','D'].map(k=>`<div class='list-item'><label for='q-${k}'>${k}</label><input id='q-${k}' type='number' inputmode='decimal' step='0.01' value='${state.quality[k]}'/></div>`).join('')}</div></section>
+    <p class='small' style='margin:-8px 4px 16px'>集中時間 = 学習時間 × 係数</p>
+    <button id='saveQ' class='btn primary block'>保存</button>`;
+    bindSettingsBack();
+    $('#saveQ').onclick=async()=>{const quality={}; ['S','A','B','C','D'].forEach(k=>quality[k]=+($(`#q-${k}`).value||1)); await setDoc(doc(db,`users/${state.uid}/settings/main`),{quality,appName:APP_NAME},{merge:true}); await refresh();};
+    return;
+  }
+  if(mode==='backup'){
+    el.innerHTML=`${settingsBackHtml('バックアップ')}
+    <section class='surface stack'><h3>書き出し</h3><button id='exp' class='btn'>JSONを書き出す</button></section>
+    <section class='surface stack'><h3>読み込み</h3><input id='impFile' type='file' accept='application/json' aria-label='読み込むJSONファイル'/><button id='imp' class='btn'>JSONを読み込む</button><p class='small' style='margin:0'>今のデータに追加されます。同じファイルを2回読み込むと記録が重複します。</p></section>
+    <section class='surface stack'><h3>全データの削除</h3><p class='small' style='margin:0'>教科・教材・ラベル・学習記録・テスト・週目標をすべて削除します。元に戻せません。</p><button id='wipe' class='btn danger'>全データを削除</button></section>`;
+    bindSettingsBack();
+    return;
+  }
+  if(mode==='notify'){
+    el.innerHTML=`${settingsBackHtml('通知')}
+    <div class='group-title'>アプリを開いたとき</div>
+    <section class='surface'>
+      <div class='list-item'><span>許可状態</span><b id='notifyStatus' class='muted'></b></div>
+      <div class='list-item'><label for='notifyHourInput' style='margin:0;color:var(--ink);font-size:var(--fs-body);font-weight:400'>通知する時刻</label><input id='notifyHourInput' type='time' value='${notifyTimeStr()}' style='width:auto'/></div>
+      <div class='row' style='margin-top:8px'><button id='notifyEnable' class='btn primary small'>通知を許可</button><button id='notifySave' class='btn small'>時刻を保存</button></div>
+    </section>
+    <p class='small' style='margin:-8px 4px 16px'>設定した時刻を過ぎてからアプリを開くと、今日のタスクを通知します。アプリを閉じている間は届きません。</p>
+    <div class='group-title'>プッシュ通知</div>
+    <section class='surface'>
+      <div class='list-item'><span>登録状態</span><b id='pushStatus' class='muted'></b></div>
+      <div class='row' style='margin-top:8px'><button id='pushRegister' class='btn small'>登録</button><button id='pushTest' class='btn small'>テスト送信</button><button id='pushUnregister' class='btn danger small'>登録を解除</button></div>
+    </section>
+    <p class='small' style='margin:-8px 4px 16px'>アプリを閉じていても届く通知です。サーバー側の準備が必要です。</p>`;
+    bindSettingsBack();
+    $('#notifyStatus').textContent=notifyPermissionLabel();
+    $('#notifyEnable').onclick=async()=>{ if(!('Notification' in window)) return alert('この端末・ブラウザは通知に対応していません。'); await Notification.requestPermission(); $('#notifyStatus').textContent=notifyPermissionLabel(); };
+    $('#notifySave').onclick=()=>{ try{ localStorage.setItem(NOTIFY_HOUR_KEY, $('#notifyHourInput').value||'07:00'); alert('時刻を保存しました'); }catch(_){ alert('この端末では保存できませんでした。'); } };
+    refreshPushStatus();
+    $('#pushRegister').onclick=registerPush;
+    $('#pushTest').onclick=sendTestPush;
+    $('#pushUnregister').onclick=unregisterPush;
+    return;
+  }
+  if(mode==='about'){
+    el.innerHTML=`${settingsBackHtml('データの保存先')}
+    <section class='surface'><p style='margin:0;font-size:var(--fs-cap);line-height:1.8'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</p></section>`;
+    bindSettingsBack();
+    return;
+  }
+  const q=state.quality||{};
+  el.innerHTML=`
+  <section class='surface menu'><div class='menu-row menu-static'><span>${escapeHtml(state.userName||state.userEmail||'不明')}</span>${state.userName&&state.userEmail?`<span class='muted'>${escapeHtml(state.userEmail)}</span>`:''}</div></section>
+  <div class='group-title'>データ</div>
+  <section class='surface menu'>${menuRow('openManage','教科・教材・ラベル',`${state.subjects.length}教科`)}${menuRow('openBackup','バックアップ')}</section>
+  <div class='group-title'>記録</div>
+  <section class='surface menu'>${menuRow('openQuality','質係数',['S','A','B','C','D'].map(k=>`${k} ${q[k]}`).join('  '))}</section>
+  <div class='group-title'>通知</div>
+  <section class='surface menu'>${menuRow('openNotify','通知',notifyPermissionLabel())}</section>
+  <div class='group-title'>このアプリについて</div>
+  <section class='surface menu'>${menuRow('openAbout','データの保存先')}</section>
+  <section class='surface menu' style='margin-top:24px'><button id='settingsLogout' class='menu-row danger'>ログアウト</button></section>`;
+  $('#openManage').onclick=()=>renderSettings('manage');
+  $('#openBackup').onclick=()=>renderSettings('backup');
+  $('#openQuality').onclick=()=>renderSettings('quality');
+  $('#openNotify').onclick=()=>renderSettings('notify');
+  $('#openAbout').onclick=()=>renderSettings('about');
+  $('#settingsLogout').onclick=()=>signOut(auth);
+  bindSettingsPanelActions();
+}
 
 let settingsPanelActionsBound = false;
 function bindSettingsPanelActions(){
@@ -676,7 +855,7 @@ function bindSettingsPanelActions(){
   });
 }
 
-function switchScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
+function switchScreen(id){ setTitle(SCREEN_TITLES[id]||APP_NAME); if(!$('#'+id).classList.contains('active')) window.scrollTo(0,0); document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
 async function refresh(){
   await loadAll();
   const today=logicalDateStr();
@@ -702,15 +881,16 @@ $('#loginBtn').onclick=async()=>{
     $('#loginBtn').disabled=false;
   }
 };
-document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>switchScreen(b.dataset.screen));
+document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>{ if(b.dataset.screen==='settings') state.settingsMode='menu'; switchScreen(b.dataset.screen); });
+bindSettingsPanelActions();
 let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
-  if(!user){ lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#loginBtn').hidden=false; return; }
+  if(!user){ lastAuthUid=null; state.uid=null; state.userName=''; state.userEmail=''; $('#app').hidden=true; $('#bottomNav').hidden=true; $('#signedOut').hidden=false; $('#appTitle').textContent=APP_NAME; return; }
   state.userName=user.displayName||''; state.userEmail=user.email||'';
   if(lastAuthUid===user.uid) return; // 同一ユーザーの再発火時はプロフィール情報のみ更新し、再読み込みはしない
   lastAuthUid=user.uid;
-  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#loginBtn').hidden=true;
+  state.uid=user.uid; $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true;
   try {
     await withTimeout(ensureSeedData());
     await withTimeout(refresh());
