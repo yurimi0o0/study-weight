@@ -288,6 +288,7 @@ function renderRecordForm(edit=null){
 }
 
 let listMenuBound=false;
+let suppressMenuCloseUntil=0; // 長押しで開いた直後、指を離したときの合成クリックでメニューが閉じないようにする
 function renderList(){
   $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
@@ -323,14 +324,14 @@ function renderList(){
     document.querySelectorAll('#recordsWrap .post').forEach(p=>{
       p.querySelector('.post-more').onclick=e=>{ e.stopPropagation(); p.querySelector('.post-menu')?closeMenu():openMenu(p); };
       // 長押しでも開く（指が動いたらスクロールとみなしてやめる）
-      let timer=null, sx=0, sy=0;
-      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
+      let timer=null, sx=0, sy=0, longPressed=false;
+      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; longPressed=false; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; longPressed=true; suppressMenuCloseUntil=Date.now()+800; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
       p.addEventListener('touchmove',e=>{ const t=e.touches[0]; if(timer&&(Math.abs(t.clientX-sx)>8||Math.abs(t.clientY-sy)>8)){ clearTimeout(timer); timer=null; } },{passive:true});
-      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,()=>{ if(timer){ clearTimeout(timer); timer=null; } }));
+      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,e=>{ if(timer){ clearTimeout(timer); timer=null; } if(longPressed&&ev==='touchend'){ if(e.cancelable) e.preventDefault(); suppressMenuCloseUntil=Date.now()+350; } longPressed=false; },{passive:false}));
       p.addEventListener('contextmenu',e=>{ if(e.target.closest('.post-menu')) return; e.preventDefault(); openMenu(p); });
     });
     if(!listMenuBound){ listMenuBound=true;
-      document.addEventListener('click',e=>{ if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
+      document.addEventListener('click',e=>{ if(Date.now()<suppressMenuCloseUntil){ suppressMenuCloseUntil=0; return; } if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
       document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const open=document.querySelector('.post-menu'); if(open){ const b=open.closest('.post')?.querySelector('.post-more'); open.remove(); b?.setAttribute('aria-expanded','false'); b?.focus(); } } });
     }
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
