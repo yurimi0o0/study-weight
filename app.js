@@ -111,7 +111,12 @@ async function loadAll(fromCache=false){
   if(uid!==state.uid) return;
   // 圏外のときは普通の読み込みでも端末内のデータが返ってくる。1つでもそうなら「古いかもしれないデータ」として扱う
   const stale = fromCache || [subjects, materials, labels, records, tests, goals, settingsSnap, scheduleSnap, periods, days].some(x=>x.metadata?.fromCache);
-  if(stale && state.serverLoaded) return; // 最新のデータが先に届いていたら、古いデータで上書きしない
+  if(stale && state.serverLoaded){
+    // 最新のデータを一度読めたあとは、古いデータで画面を上書きしない。
+    // ただし普通の読み込みが端末内のデータで返ってきた（圏外になった）ときは、書き込みは止める
+    if(!fromCache) state.fromCache=true;
+    return;
+  }
   if(!stale) state.serverLoaded=true;
   state.subjects=rows(subjects).sort(byOrder);
   state.materials=rows(materials).sort(byOrder);
@@ -909,6 +914,7 @@ function bindSettingsPanelActions(){
 function switchScreen(id){ setTitle(SCREEN_TITLES[id]||APP_NAME); if(!$('#'+id).classList.contains('active')) window.scrollTo(0,0); document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id)); document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id)); if(id==='record') renderRecordForm(); if(id==='list') renderList(); if(id==='goals') renderGoals(); if(id==='settings') renderSettings(); if(id==='dashboard') renderDashboard(); }
 async function refresh(reload=true, keepRecordForm=false){
   if(reload) await loadAll();
+  updateSyncBadge();
   const today=logicalDateStr();
   if(state.schedule?.startDate && today>=state.schedule.startDate) await ensureScheduleDay(today); // タスク編集直後でも、表示中の画面に関わらず今日の分を再同期する
   ['dashboard','record','list','goals','settings'].forEach(id=>{ if(keepRecordForm && id==='record') return; if($('#'+id).classList.contains('active')) switchScreen(id); });
@@ -936,14 +942,20 @@ document.querySelectorAll('.bottom-nav button').forEach(b=>b.onclick=()=>{ if(b.
 bindSettingsPanelActions();
 let lastAuthUid; // 直前に処理したuid。トークン更新等で同一ユーザーのまま再発火した際の二重refreshを防ぐ
 function showApp(){ $('#app').hidden=false; $('#bottomNav').hidden=false; $('#signedOut').hidden=true; }
+// 最新のデータが読めなかったとき（圏外など）は、チェックが押せない理由がわかるように右上に出しておく
+function updateSyncBadge(){
+  const badge=$('#syncStatus'); if(!badge || loadingTimer) return;
+  if(state.uid && state.fromCache){ badge.textContent='オフライン'; badge.hidden=false; } else badge.hidden=true;
+}
+// 通信が戻ったら読み込み直して、書き込みできる状態に戻す
+window.addEventListener('online', ()=>{ if(state.uid && state.fromCache) refresh(true, true).catch(err=>console.error(err)); });
 // 「読み込み中.」→「..」→「...」と点を増やして、固まっていないことを伝える
 let loadingTimer=null;
 function setLoading(on){
   const badge=$('#syncStatus');
   if(!on){
     clearInterval(loadingTimer); loadingTimer=null;
-    // 最新のデータが読めなかったとき（圏外など）は、チェックが押せない理由がわかるように出しておく
-    if(badge){ if(state.fromCache){ badge.textContent='オフライン'; badge.hidden=false; } else badge.hidden=true; }
+    updateSyncBadge();
     return;
   }
   if(badge){ badge.innerHTML="読み込み中<span class='loading-dots' aria-hidden='true'>.</span>"; badge.hidden=false; }
