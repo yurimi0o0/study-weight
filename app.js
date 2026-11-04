@@ -79,6 +79,7 @@ function userDoc(path,id){ return doc(db, `users/${state.uid}/${path}/${id}`); }
 
 // 初回だけ教科・ラベル・設定の初期値を入れる。loadAll() の結果を見て判断するので、追加の読み込みはしない
 async function ensureSeedData(){
+  if(state.fromCache) return false; // 圏外などで最新のデータが読めていないときは、空に見えても初期データを入れない（二重に作らないため）
   setDoc(doc(db, `users/${state.uid}`), { updatedAt:new Date().toISOString() }, {merge:true}).catch(()=>{}); // 完了を待たない
   const jobs=[];
   if (!state.subjects.length) DEFAULT_SUBJECTS.forEach((name,i)=>jobs.push(addDoc(userCol('subjects'), { name, color:'#26c6da', order:i, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() })));
@@ -108,8 +109,10 @@ async function loadAll(fromCache=false){
     many(userCol('scheduleDays')),
   ]);
   if(uid!==state.uid) return;
-  if(fromCache && state.serverLoaded) return; // 通信の結果が先に届いていたら、古いデータで上書きしない
-  if(!fromCache) state.serverLoaded=true;
+  // 圏外のときは普通の読み込みでも端末内のデータが返ってくる。1つでもそうなら「古いかもしれないデータ」として扱う
+  const stale = fromCache || [subjects, materials, labels, records, tests, goals, settingsSnap, scheduleSnap, periods, days].some(x=>x.metadata?.fromCache);
+  if(stale && state.serverLoaded) return; // 最新のデータが先に届いていたら、古いデータで上書きしない
+  if(!stale) state.serverLoaded=true;
   state.subjects=rows(subjects).sort(byOrder);
   state.materials=rows(materials).sort(byOrder);
   state.labels=rows(labels);
@@ -120,7 +123,7 @@ async function loadAll(fromCache=false){
   state.schedule=scheduleSnap.exists()?{startDate:'',defaultTasks:[],...scheduleSnap.data()}:{startDate:'',defaultTasks:[]};
   state.schedulePeriods=rows(periods).sort((a,b)=>(a.order??999)-(b.order??999)||(a.startDate||'').localeCompare(b.startDate||''));
   state.scheduleDays=rows(days);
-  state.fromCache=fromCache;
+  state.fromCache=stale;
 }
 
 function aggregate(){
@@ -937,8 +940,13 @@ function showApp(){ $('#app').hidden=false; $('#bottomNav').hidden=false; $('#si
 let loadingTimer=null;
 function setLoading(on){
   const badge=$('#syncStatus');
-  if(!on){ clearInterval(loadingTimer); loadingTimer=null; if(badge) badge.hidden=true; return; }
-  if(badge) badge.hidden=false;
+  if(!on){
+    clearInterval(loadingTimer); loadingTimer=null;
+    // 最新のデータが読めなかったとき（圏外など）は、チェックが押せない理由がわかるように出しておく
+    if(badge){ if(state.fromCache){ badge.textContent='オフライン'; badge.hidden=false; } else badge.hidden=true; }
+    return;
+  }
+  if(badge){ badge.innerHTML="読み込み中<span class='loading-dots' aria-hidden='true'>.</span>"; badge.hidden=false; }
   if(loadingTimer) return;
   let n=0;
   const tick=()=>{ n=n%3+1; const dots='.'.repeat(n); document.querySelectorAll('.loading-dots').forEach(el=>{ el.textContent=dots; }); if(badge) badge.hidden=!!document.querySelector('#dashboard .loading-dots'); }; // 画面の真ん中に出ている間は、上の表示は出さない
