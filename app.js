@@ -524,9 +524,10 @@ async function ensureScheduleDay(date){
 async function toggleScheduleTask(date,taskId){
   if(state.fromCache) return; // 端末内の古い行を書き戻すと、他の端末での変更を上書きしてしまう
   const d=await ensureScheduleDay(date); if(!d) return;
-  const done={...(d.done||{}), [taskId]: !d.done?.[taskId]};
-  d.done=done; // ローカル状態を即時反映してからバックエンドに書き込む
-  await setDoc(scheduleDayDoc(date), {...d,done,updatedAt:new Date().toISOString()}, {merge:true});
+  const next=!d.done?.[taskId];
+  d.done={...(d.done||{}), [taskId]: next}; // ローカル状態を即時反映してからバックエンドに書き込む
+  // 押したタスクのチェックだけを書き込む（行をまるごと書き戻すと、手元が古いときに他の端末での変更を上書きしてしまう）
+  await setDoc(scheduleDayDoc(date), {done:{[taskId]:next}, updatedAt:new Date().toISOString()}, {merge:true});
 }
 function scheduleCarryover(){
   const today=logicalDateStr(); const yesterday=addDays(today,-1);
@@ -947,6 +948,13 @@ function updateSyncBadge(){
   const badge=$('#syncStatus'); if(!badge || loadingTimer) return;
   if(state.uid && state.fromCache){ badge.textContent='オフライン'; badge.hidden=false; } else badge.hidden=true;
 }
+// 通信が切れたら、次の読み込みを待たずにすぐ書き込みを止める
+window.addEventListener('offline', ()=>{
+  if(!state.uid || state.fromCache) return;
+  state.fromCache=true; updateSyncBadge();
+  const active=document.querySelector('.screen.active')?.id;
+  if(active==='dashboard') renderDashboard(); // チェックを押せない表示に描き直す
+});
 // 通信が戻ったら読み込み直して、書き込みできる状態に戻す
 window.addEventListener('online', ()=>{ if(state.uid && state.fromCache) refresh(true, true).catch(err=>console.error(err)); });
 // 「読み込み中.」→「..」→「...」と点を増やして、固まっていないことを伝える

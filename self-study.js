@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, collection, doc, getDocs, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getFirestore, collection, doc, getDocs, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC4gkAvxpB87UqVUItrLK098AY758f2hMQ', authDomain: 'study-weight.firebaseapp.com', projectId: 'study-weight', storageBucket: 'study-weight.firebasestorage.app', messagingSenderId: '850012109401', appId: '1:850012109401:web:6ba78214593f87c7054f48'
@@ -94,11 +94,8 @@ function enhanceCarryovers(){
 async function skipCarryover(date,id){
   if(!uid || !date || !id) return;
   const ref=doc(db, `users/${uid}/scheduleDays/${date}`);
-  const snap=await getDoc(ref);
-  const data=snap.exists()?snap.data():{date};
-  const skipped={...(data.skipped||{}), [id]: true};
-  const done={...(data.done||{}), [id]: false};
-  await setDoc(ref, {date, skipped, done, updatedAt:new Date().toISOString()}, {merge:true});
+  // 外した1件だけを書き込む（行の他のチェックを読み込んだ値で書き戻さない）
+  await setDoc(ref, {date, skipped:{[id]:true}, done:{[id]:false}, updatedAt:new Date().toISOString()}, {merge:true});
   skippedCarryovers.add(carryKey(date,id));
 }
 
