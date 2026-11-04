@@ -622,6 +622,7 @@ label.list-item input[type="checkbox"] {
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 label.list-item input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+label.list-item input[type="checkbox"]:disabled { opacity: 0.4; cursor: default; }
 label.list-item input[type="checkbox"]:checked::before {
   content: "";
   width: 6px;

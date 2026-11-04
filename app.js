@@ -90,6 +90,7 @@ async function ensureSeedData(){
 }
 // fromCache=true のときは端末内のデータだけを読む（通信しないのですぐ返る）
 async function loadAll(fromCache=false){
+  const uid=state.uid; // 読み込み中に別のユーザーに切り替わったら、結果を捨てる
   const many = fromCache ? getDocsFromCache : getDocs;
   const one = fromCache ? getDocFromCache : getDoc;
   const rows = snap => snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -106,6 +107,7 @@ async function loadAll(fromCache=false){
     many(query(userCol('schedulePeriods'))),
     many(userCol('scheduleDays')),
   ]);
+  if(uid!==state.uid) return;
   if(fromCache && state.serverLoaded) return; // 通信の結果が先に届いていたら、古いデータで上書きしない
   if(!fromCache) state.serverLoaded=true;
   state.subjects=rows(subjects).sort(byOrder);
@@ -500,6 +502,7 @@ async function ensureScheduleDay(date){
   const entry={id:date,...data}; state.scheduleDays.push(entry); return entry;
 }
 async function toggleScheduleTask(date,taskId){
+  if(state.fromCache) return; // 端末内の古い行を書き戻すと、他の端末での変更を上書きしてしまう
   const d=await ensureScheduleDay(date); if(!d) return;
   const done={...(d.done||{}), [taskId]: !d.done?.[taskId]};
   d.done=done; // ローカル状態を即時反映してからバックエンドに書き込む
@@ -540,8 +543,8 @@ function tasksCardHtml(){
   const emptyMsg=activePeriod
     ?`「${escapeHtml(activePeriod.name)}」期間のタスクはまだありません。目標タブの設定から追加できます。`
     :'タスクはまだありません。目標タブの設定から追加できます。';
-  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''}/><span>${escapeHtml(t.text)}</span><span class='tag'>${fmtMD(t.date).replace(/\(.\)$/,'')}の分</span></label>`).join('');
-  const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
+  const carryRows=carry.map(t=>`<label class='list-item carry-item'><input type='checkbox' class='schCarryCheck' data-date='${t.date}' data-id='${t.id}' ${t.done?'checked':''} ${state.fromCache?'disabled':''}/><span>${escapeHtml(t.text)}</span><span class='tag'>${fmtMD(t.date).replace(/\(.\)$/,'')}の分</span></label>`).join('');
+  const todayRows=tasks.map(t=>`<label class='list-item'><input type='checkbox' class='schTaskCheck' data-date='${today}' data-id='${t.id}' ${done[t.id]?'checked':''} ${state.fromCache?'disabled':''}/><span>${escapeHtml(t.text)}</span></label>`).join('');
   return `<section class='surface'>
     <div class='surface-head'><h2>今日のタスク</h2><span class='muted tabnum'>${tasks.length?`${doneCount}/${tasks.length}`:''}</span></div>
     ${activePeriod||carry.length?`<div class='muted' style='margin:-8px 0 4px'>${activePeriod?`${escapeHtml(activePeriod.name)}の期間中`:''}${activePeriod&&carry.length?'　':''}${carry.length?`前日からの繰り越し ${carry.length}件`:''}</div>`:''}
