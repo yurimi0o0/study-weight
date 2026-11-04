@@ -963,9 +963,9 @@ async function bootFromCache(uid){
     switchScreen(active==='record'?'dashboard':active);
   }catch(_){ /* 初めて開いた端末など、端末内にデータが無いとき */ }
 }
-// ログインの確認を待たずに、前回のユーザーのデータを端末内から表示する
-const lastUid=lsGet(LAST_UID_KEY);
-if(lastUid){ showApp(); showLoading(); bootFromCache(lastUid); }
+// 前回ログインしていた端末では、ログインの確認を待つ間も「読み込み中」を出す。
+// データはログインが確認できてから表示する（期限切れなどで別の状態になっていたときに、前回のデータを見せないため）
+if(lsGet(LAST_UID_KEY)){ showApp(); showLoading(); }
 
 onAuthStateChanged(auth, async user=>{
   console.log('Auth state:', user ? `logged in (${user.email || user.uid})` : 'null (logged out)');
