@@ -19,14 +19,11 @@ function injectStyles(){
   const style=document.createElement('style');
   style.id='selfStudyStyles';
   style.textContent=`
-    .cal-cell.self-study-done { border-color: rgba(217, 179, 107, 0.8); box-shadow: inset 0 0 0 1.5px var(--gold), 0 0 10px rgba(217, 179, 107, 0.12); }
-    .cal-cell.self-study-done small { color: var(--gold); font-weight: 800; opacity: 1; font-size: 0.72rem; }
-    .cal-check-card { margin: 12px 0 10px; }
-    label.cal-check { border-color: rgba(217, 179, 107, 0.45); background: rgba(217, 179, 107, 0.10); }
-    label.cal-check input[type="checkbox"]:checked { background: var(--gold); border-color: var(--gold); }
+    .cal-cell.self-study-done small { color: var(--self); font-weight: 700; }
+    .cal-cell.studied-4.self-study-done small { color: var(--accent-ink); }
+    .cal-check-card { margin: 0 0 8px; }
+    label.cal-check input[type="checkbox"]:checked { background: var(--self); border-color: var(--self); }
     label.cal-check input[type="checkbox"]:disabled { opacity: 0.6; cursor: wait; }
-    .skip-carry-external { margin-left: auto; flex: none; font-size: 1rem; }
-    .carry-date-prefix { color: var(--danger); font-weight: 700; margin-right: 4px; }
   `;
   document.head.appendChild(style);
 }
@@ -36,9 +33,9 @@ function markCalendar(){
   document.querySelectorAll('.cal-cell[data-date]').forEach(cell=>{
     const done=isDone(cell.dataset.date);
     cell.classList.toggle('self-study-done', done);
-    cell.title=done?`${cell.dataset.date} 自習`:cell.dataset.date;
-    cell.setAttribute('aria-label', done?`${cell.dataset.date} 自習`:cell.dataset.date);
-    if(done){ const marker=cell.querySelector('small'); if(marker) marker.textContent='📚'; }
+    if(!cell.dataset.baseLabel) cell.dataset.baseLabel=cell.getAttribute('aria-label')||cell.dataset.date;
+    cell.setAttribute('aria-label', done?`${cell.dataset.baseLabel} 自習`:cell.dataset.baseLabel);
+    const marker=cell.querySelector('small'); if(marker && marker.textContent!==(done?'自':'')) marker.textContent=done?'自':'';
   });
 }
 function injectCheck(){
@@ -48,7 +45,7 @@ function injectCheck(){
   const card=document.createElement('div'); card.className='cal-check-card';
   const label=document.createElement('label'); label.className='list-item cal-check';
   const checkbox=document.createElement('input'); checkbox.type='checkbox'; checkbox.checked=isDone(date); checkbox.dataset.date=date;
-  const text=document.createElement('span'); text.textContent='自習';
+  const text=document.createElement('span'); text.textContent='この日は自習した';
   label.append(checkbox,text); card.append(label); wrap.prepend(card);
   checkbox.onchange=async(e)=>{
     e.target.disabled=true;
@@ -79,20 +76,12 @@ function enhanceCarryovers(){
     if(skippedCarryovers.has(carryKey(date,id))){ item.remove(); return; }
     const title=item.closest('.card')?.querySelector('.carry-title');
     if(title) title.textContent=`繰り越し（${date} の分・未完了）`;
-    const span=item.querySelector('span');
-    if(span && !span.querySelector('.carry-date-prefix')){
-      const prefix=document.createElement('b');
-      prefix.className='carry-date-prefix';
-      prefix.textContent=`${date}の分`;
-      span.prepend(' ');
-      span.prepend(prefix);
-    }
     if(item.querySelector('.skip-carry-external')) return;
     const button=document.createElement('button');
     button.type='button';
     button.className='link-btn danger skip-carry-external';
-    button.textContent='×';
-    button.setAttribute('aria-label','この繰り越しを罰にする');
+    button.textContent='外す';
+    button.setAttribute('aria-label','この繰り越しを外す');
     button.onclick=async(event)=>{
       event.preventDefault(); event.stopPropagation();
       if(!confirm('この繰り越しはもうできない扱いにしますか？')) return;
