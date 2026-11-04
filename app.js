@@ -104,6 +104,7 @@ const ICON_CHEV=`<svg class='ico chev' viewBox='0 0 24 24' aria-hidden='true'><p
 const ICON_BACK=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m15 6-6 6 6 6'/></svg>`;
 const ICON_EDIT=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 20h4L19 9l-4-4L4 16v4Z'/><path d='m13.5 6.5 4 4'/></svg>`;
 const ICON_TRASH=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 7h16'/><path d='M10 11v6M14 11v6'/><path d='M6 7l1 13h10l1-13'/><path d='M9 7V4h6v3'/></svg>`;
+const ICON_MORE=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><circle cx='5' cy='12' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/></svg>`;
 const ICON_UP=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 15 6-6 6 6'/></svg>`;
 const ICON_DOWN=`<svg class='ico' viewBox='0 0 24 24' aria-hidden='true'><path d='m6 9 6 6 6-6'/></svg>`;
 const SCREEN_TITLES={dashboard:'ホーム',list:'タイムライン',record:'記録を追加',goals:'目標',settings:'設定'};
@@ -195,8 +196,10 @@ function renderRecordForm(edit=null){
       <div class='row-2' id='timeRange' style='margin-top:8px' ${timeUnknown?'hidden':''}><div><label for='fStart'>開始</label><input id='fStart' type='time' value='${r.startTime||''}'/></div><div><label for='fEnd'>終了</label><input id='fEnd' type='time' value='${r.endTime||''}'/></div></div>
     </div>
     <div class='field-group'>
+      <div class='pair'>
       <div class='field'><label for='fSubject'>教科</label><select id='fSubject'>${state.subjects.map(s=>`<option value='${s.id}' ${s.id===r.subjectId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
       <div class='field'><label for='fMaterial'>教材</label><select id='fMaterial'><option value=''>未選択</option></select></div>
+      </div>
       <div class='field'><span class='field-label' id='qLabel'>質</span><div class='segmented' role='radiogroup' aria-labelledby='qLabel'>${['S','A','B','C','D'].map(q=>`<label><input type='radio' name='fQuality' value='${q}' ${q===(r.quality||'A')?'checked':''}/>${q}</label>`).join('')}</div></div>
     </div>
     <div class='field-group'>
@@ -284,6 +287,7 @@ function renderRecordForm(edit=null){
   if(edit) $('#cancelEdit').onclick=()=>switchScreen('list');
 }
 
+let listMenuBound=false;
 function renderList(){
   $('#list').innerHTML=`<details class='fold'><summary>絞り込み</summary><section class='surface'><div class='row-2'><div><label for='fltDate'>日付</label><input id='fltDate' type='date'/></div><div><label for='fltSubject'>教科</label><select id='fltSubject'><option value=''>すべて</option>${state.subjects.map(s=>`<option value='${s.id}'>${escapeHtml(s.name)}</option>`).join('')}</select></div></div><div class='row-2' style='margin-top:12px'><div><label for='fltQuality'>質</label><select id='fltQuality'><option value=''>すべて</option>${['S','A','B','C','D'].map(q=>`<option>${q}</option>`).join('')}</select></div><div><label for='fltLabel'>ラベル</label><select id='fltLabel'><option value=''>すべて</option>${state.labels.map(l=>`<option value='${l.id}'>${escapeHtml(l.name)}</option>`).join('')}</select></div></div></section></details><div id='recordsWrap'></div>`;
   const draw=()=>{const d=$('#fltDate').value,s=$('#fltSubject').value,q=$('#fltQuality').value,l=$('#fltLabel').value;
@@ -291,19 +295,44 @@ function renderList(){
     const today=logicalDateStr(), yest=addDays(today,-1);
     const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
     const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
-      return `<article class='post'>
+      return `<article class='post' data-id='${r.id}'>
       <div class='avatar' aria-hidden='true'>${escapeHtml(sub.slice(0,1))}</div>
       <div class='post-body'>
-        <div class='post-head'><b class='post-name'>${escapeHtml(sub)}</b>${mat?`<span class='post-sub'>${escapeHtml(mat)}</span>`:''}<time class='post-time' datetime='${r.date}'>${dayLabel(r.date)}${t?` ${t}`:''}</time></div>
+        <div class='post-head'><b class='post-name'>${escapeHtml(sub)}</b>${mat?`<span class='post-sub'>${escapeHtml(mat)}</span>`:''}<time class='post-time' datetime='${r.date}'>${dayLabel(r.date)}${t?` ${t}`:''}</time><button class='post-more' data-id='${r.id}' aria-label='この記録の操作' aria-haspopup='menu' aria-expanded='false'>${ICON_MORE}</button></div>
         ${r.memo?`<p class='post-text'>${escapeHtml(r.memo)}</p>`:''}
         <div class='post-stats'><span class='post-big'>${fmtShort(r.minutes)}</span><span>${r.startTime||r.endTime?`${r.startTime||'?'}–${r.endTime||'?'}`:'時刻不明'}</span><span>集中 ${fmtShort(focusMinutes(r))}</span><span>質${escapeHtml(r.quality||'')}</span>${(r.labelIds||[]).map(id=>`<span class='tag'>${escapeHtml(labelName(id))}</span>`).join('')}</div>
-        <div class='post-actions'><button class='post-act edit' data-id='${r.id}' aria-label='編集'>${ICON_EDIT}</button><button class='post-act danger del' data-id='${r.id}' aria-label='削除'>${ICON_TRASH}</button></div>
       </div>
     </article>`; };
     $('#recordsWrap').innerHTML=rows.length?`<div class='feed'>${rows.map(post).join('')}</div>`
       :`<section class='surface empty-state'>${state.records.length?'条件に合う記録はありません':'まだ記録がありません'}</section>`;
-    document.querySelectorAll('#recordsWrap .edit').forEach(b=>b.onclick=()=>{switchScreen('record');renderRecordForm(state.records.find(x=>x.id===b.dataset.id));});
-    document.querySelectorAll('#recordsWrap .del').forEach(b=>b.onclick=async()=>{if(confirm('この記録を削除しますか？')){await deleteDoc(userDoc('studyRecords',b.dataset.id)); await refresh();}});
+    const editRecord=id=>{ switchScreen('record'); renderRecordForm(state.records.find(x=>x.id===id)); };
+    const deleteRecord=async id=>{ if(confirm('この記録を削除しますか？')){ await deleteDoc(userDoc('studyRecords',id)); await refresh(); } };
+    const closeMenu=()=>{ document.querySelectorAll('.post-menu').forEach(m=>m.remove()); document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); };
+    const openMenu=(postEl)=>{
+      closeMenu();
+      const id=postEl.dataset.id, btn=postEl.querySelector('.post-more');
+      const menu=document.createElement('div'); menu.className='post-menu'; menu.setAttribute('role','menu');
+      menu.innerHTML=`<button role='menuitem' class='pm-edit'>${ICON_EDIT}編集</button><button role='menuitem' class='pm-del danger'>${ICON_TRASH}削除</button>`;
+      postEl.append(menu); btn.setAttribute('aria-expanded','true');
+      // 画面下にはみ出すときは上に開く
+      const r=menu.getBoundingClientRect(); if(r.bottom>window.innerHeight-90) menu.classList.add('up');
+      menu.querySelector('.pm-edit').onclick=()=>{ closeMenu(); editRecord(id); };
+      menu.querySelector('.pm-del').onclick=()=>{ closeMenu(); deleteRecord(id); };
+      menu.querySelector('button').focus();
+    };
+    document.querySelectorAll('#recordsWrap .post').forEach(p=>{
+      p.querySelector('.post-more').onclick=e=>{ e.stopPropagation(); p.querySelector('.post-menu')?closeMenu():openMenu(p); };
+      // 長押しでも開く（指が動いたらスクロールとみなしてやめる）
+      let timer=null, sx=0, sy=0;
+      p.addEventListener('touchstart',e=>{ if(e.target.closest('.post-menu,.post-more')) return; const t=e.touches[0]; sx=t.clientX; sy=t.clientY; timer=setTimeout(()=>{ timer=null; openMenu(p); if(navigator.vibrate) navigator.vibrate(10); },500); },{passive:true});
+      p.addEventListener('touchmove',e=>{ const t=e.touches[0]; if(timer&&(Math.abs(t.clientX-sx)>8||Math.abs(t.clientY-sy)>8)){ clearTimeout(timer); timer=null; } },{passive:true});
+      ['touchend','touchcancel'].forEach(ev=>p.addEventListener(ev,()=>{ if(timer){ clearTimeout(timer); timer=null; } }));
+      p.addEventListener('contextmenu',e=>{ if(e.target.closest('.post-menu')) return; e.preventDefault(); openMenu(p); });
+    });
+    if(!listMenuBound){ listMenuBound=true;
+      document.addEventListener('click',e=>{ if(!e.target.closest('.post-menu')) document.querySelectorAll('.post-menu').forEach(m=>{ m.remove(); }), document.querySelectorAll('.post-more[aria-expanded=true]').forEach(b=>b.setAttribute('aria-expanded','false')); });
+      document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const open=document.querySelector('.post-menu'); if(open){ const b=open.closest('.post')?.querySelector('.post-more'); open.remove(); b?.setAttribute('aria-expanded','false'); b?.focus(); } } });
+    }
   }; ['fltDate','fltSubject','fltQuality','fltLabel'].forEach(id=>$('#'+id).onchange=draw); draw();
 }
 const subjectName=id=>state.subjects.find(x=>x.id===id)?.name||'未設定';
