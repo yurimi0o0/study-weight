@@ -340,11 +340,11 @@ function recordOrderKey(r){
   if(createdDay===r.date){ const m=created.getHours()*60+created.getMinutes(); return m<240?m+1440:m; }
   return createdDay>r.date?99999:-1; // あとから過去の日に足した記録は、その日の一番上
 }
-// タイムラインの教科の色（Apple のシステムカラー）
+// タイムラインの教科の色（Apple のシステムカラーのダークモード用。暗い背景で見やすいよう少し明るい）
 const TL_COLORS=[
-  ['#FF3B30','レッド'],['#FF9500','オレンジ'],['#FFCC00','イエロー'],['#34C759','グリーン'],
-  ['#00C7BE','ミント'],['#30B0C7','ティール'],['#32ADE6','シアン'],['#007AFF','ブルー'],
-  ['#5856D6','インディゴ'],['#AF52DE','パープル'],['#FF2D55','ピンク'],['#A2845E','ブラウン'],
+  ['#FF453A','レッド'],['#FF9F0A','オレンジ'],['#FFD60A','イエロー'],['#30D158','グリーン'],
+  ['#63E6E2','ミント'],['#40C8E0','ティール'],['#64D2FF','シアン'],['#0A84FF','ブルー'],
+  ['#5E5CE6','インディゴ'],['#BF5AF2','パープル'],['#FF375F','ピンク'],['#AC8E68','ブラウン'],
 ];
 const validHex=h=>/^#[0-9a-fA-F]{6}$/.test(h||'')?h.toUpperCase():'';
 const subjectColor=id=>validHex(state.subjects.find(x=>x.id===id)?.timelineColor);
@@ -859,7 +859,7 @@ function renderSettings(mode=state.settingsMode||'menu'){
             <button class='swatch none' data-color='' aria-label='色なし' aria-pressed='${!col}'></button>
             ${TL_COLORS.map(([h,n])=>`<button class='swatch' data-color='${h}' style='--c:${h}' aria-label='${n}' aria-pressed='${col===h}'></button>`).join('')}
           </div>
-          <label class='custom-color'><span>自分で選ぶ</span><input type='color' class='color-input' value='${col||'#007AFF'}'/></label>
+          <label class='custom-color'><span>自分で選ぶ</span><input type='color' class='color-input' value='${col||'#0A84FF'}'/></label>
         </div>`:''}
       </div>`; }).join('')}</section>`;
     bindSettingsBack();
