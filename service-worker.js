@@ -19,7 +19,7 @@ try {
   console.error('FCM SW init failed:', err);
 }
 
-const CACHE_NAME = 'study-density-log-v17';
+const CACHE_NAME = 'study-density-log-v18';
 const APP_SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {
