@@ -16,10 +16,17 @@
   --danger: #FF3B30;
   --self: #FF9500;        /* 自習の印 */
   --bar-rest: rgba(29, 29, 31, 0.14);
-  --heat-1: rgba(0, 122, 255, 0.12);
-  --heat-2: rgba(0, 122, 255, 0.26);
-  --heat-3: rgba(0, 122, 255, 0.50);
-  --heat-4: #007AFF;
+  --heat-1: #8ABAFD; --heat-ink-1: #000000;
+  --heat-2: #66A6FE; --heat-ink-2: #000000;
+  --heat-3: #4091FD; --heat-ink-3: #000000;
+  --heat-4: #187CF4; --heat-ink-4: #000000;
+  --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+  --heat-6: #0159BA; --heat-ink-6: #FFFFFF;
+  --heat-7: #00499C; --heat-ink-7: #FFFFFF;
+  --heat-8: #003A7F; --heat-ink-8: #FFFFFF;
+  --heat-9: #002B63; --heat-ink-9: #FFFFFF;
+  --heat-edge: rgba(138, 186, 253, 0.45);
+  /* 1日の学習時間の色：青一色の濃淡。少ない日ほど明るい青、多い日ほど黒っぽい紺。ライトもダークも同じ */
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 
@@ -49,10 +56,15 @@
     --danger: #FF6961;
     --self: #FFB340;
     --bar-rest: rgba(245, 245, 247, 0.18);
-    --heat-1: rgba(10, 132, 255, 0.18);
-    --heat-2: rgba(10, 132, 255, 0.32);
-    --heat-3: rgba(10, 132, 255, 0.55);
-    --heat-4: #0A84FF;
+    --heat-1: #8ABAFD; --heat-ink-1: #000000;
+    --heat-2: #66A6FE; --heat-ink-2: #000000;
+    --heat-3: #4091FD; --heat-ink-3: #000000;
+    --heat-4: #187CF4; --heat-ink-4: #000000;
+    --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+    --heat-6: #0159BA; --heat-ink-6: #FFFFFF;
+    --heat-7: #00499C; --heat-ink-7: #FFFFFF;
+    --heat-8: #003A7F; --heat-ink-8: #FFFFFF;
+    --heat-9: #002B63; --heat-ink-9: #FFFFFF;
   }
 }
 :root[data-theme="dark"] {
@@ -67,10 +79,15 @@
   --danger: #FF6961;
   --self: #FFB340;
   --bar-rest: rgba(245, 245, 247, 0.18);
-  --heat-1: rgba(10, 132, 255, 0.18);
-  --heat-2: rgba(10, 132, 255, 0.32);
-  --heat-3: rgba(10, 132, 255, 0.55);
-  --heat-4: #0A84FF;
+  --heat-1: #8ABAFD; --heat-ink-1: #000000;
+  --heat-2: #66A6FE; --heat-ink-2: #000000;
+  --heat-3: #4091FD; --heat-ink-3: #000000;
+  --heat-4: #187CF4; --heat-ink-4: #000000;
+  --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+  --heat-6: #0159BA; --heat-ink-6: #FFFFFF;
+  --heat-7: #00499C; --heat-ink-7: #FFFFFF;
+  --heat-8: #003A7F; --heat-ink-8: #FFFFFF;
+  --heat-9: #002B63; --heat-ink-9: #FFFFFF;
 }
 
 * { box-sizing: border-box; }
@@ -894,10 +911,28 @@ details.fold[open] > summary::before { transform: rotate(45deg); }
   position: relative;
 }
 .cal-cell.empty { cursor: default; }
-.cal-cell.studied-1 { background: var(--heat-1); }
-.cal-cell.studied-2 { background: var(--heat-2); }
-.cal-cell.studied-3 { background: var(--heat-3); }
-.cal-cell.studied-4 { background: var(--heat-4); color: var(--accent-ink); font-weight: 700; }
+.studied-1 { background: var(--heat-1); --cell-ink: var(--heat-ink-1); }
+.studied-2 { background: var(--heat-2); --cell-ink: var(--heat-ink-2); }
+.studied-3 { background: var(--heat-3); --cell-ink: var(--heat-ink-3); }
+.studied-4 { background: var(--heat-4); --cell-ink: var(--heat-ink-4); }
+.studied-5 { background: var(--heat-5); --cell-ink: var(--heat-ink-5); }
+.studied-6 { background: var(--heat-6); --cell-ink: var(--heat-ink-6); }
+.studied-7 { background: var(--heat-7); --cell-ink: var(--heat-ink-7); }
+.studied-8 { background: var(--heat-8); --cell-ink: var(--heat-ink-8); }
+.studied-9 { background: var(--heat-9); --cell-ink: var(--heat-ink-9); }
+.cal-cell[class*='studied-']:not(.studied-0) { color: var(--cell-ink); }
+.cal-cell.studied-6, .cal-cell.studied-7, .cal-cell.studied-8, .cal-cell.studied-9 { font-weight: 700; }
+/* 一番濃い紺は暗い画面の地に近いので、細い縁で面を見せる */
+.cal-cell.studied-7, .cal-cell.studied-8, .cal-cell.studied-9 { box-shadow: inset 0 0 0 1px var(--heat-edge); }
+/* 色の段階の見本：1本の帯と目盛り */
+.heat-legend { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; }
+.heat-bar { flex: 1; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 2px; max-width: 360px; }
+.heat-bar span { display: grid; gap: 4px; min-width: 0; }
+.heat-bar i { display: block; height: 10px; border-radius: 2px; }
+.heat-bar span:first-child i { border-radius: 5px 2px 2px 5px; }
+.heat-bar span:last-child i { border-radius: 2px 5px 5px 2px; }
+.heat-bar small, .heat-unit { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1; }
+.heat-unit { flex: none; }
 .cal-cell.today > span:first-child { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .cal-cell.in-period::after {
   content: "";
