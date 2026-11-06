@@ -349,9 +349,7 @@ const TL_COLORS=[
 const validHex=h=>(typeof h==='string' && /^#[0-9a-fA-F]{6}$/.test(h))?h.toUpperCase():''; // 文字列以外（読み込んだバックアップの不正な値など）は「色なし」
 const subjectColor=id=>validHex(state.subjects.find(x=>x.id===id)?.timelineColor);
 const colorName=h=>TL_COLORS.find(c=>c[0]===h)?.[1]||h;
-// 色の上に載せる文字は、明るい色なら黒、暗い色なら白
-const inkOn=h=>{ const n=parseInt(h.slice(1),16); const [r,g,b]=[n>>16&255,n>>8&255,n&255].map(v=>{v/=255;return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4;}); return 0.2126*r+0.7152*g+0.0722*b>0.4?'#1D1D1F':'#FFFFFF'; };
-const colorStyle=h=>h?` style='--c:${h};--c-ink:${inkOn(h)}'`:'';
+const colorStyle=h=>h?` style='--c:${h}'`:'';
 let listMenuBound=false;
 let suppressMenuCloseUntil=0; // 長押しで開いた直後、指を離したときの合成クリックでメニューが閉じないようにする
 function renderList(){

@@ -1022,12 +1022,12 @@ label.list-item:has(input:focus-visible),
 }
 
 /* ---------- 教科の色（タイムライン） ---------- */
-:root { --tint: 12%; }
+:root { --tint: 12%; --avatar-ink: #000000; } /* 色を塗った丸の文字は、ライトでもダークでも黒 */
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tint: 16%; } }
 :root[data-theme="dark"] { --tint: 16%; }
 /* 背景は面の色に少しだけ混ぜる。暗い画面でも鮮やかな色でベタ塗りしない */
 .post.tinted { background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); }
-.post.tinted .avatar, .avatar.filled { background: var(--c); color: var(--c-ink); }
+.post.tinted .avatar, .avatar.filled { background: var(--c); color: var(--avatar-ink); }
 @media (min-width: 720px) {
   .post:first-child { border-top-left-radius: var(--r-surface); border-top-right-radius: var(--r-surface); }
   .post:last-child { border-bottom-left-radius: var(--r-surface); border-bottom-right-radius: var(--r-surface); }
