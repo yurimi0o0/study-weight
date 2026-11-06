@@ -20,7 +20,7 @@ function injectStyles(){
   style.id='selfStudyStyles';
   style.textContent=`
     .cal-cell.self-study-done small { color: var(--self); font-weight: 700; }
-    .cal-cell.studied-5.self-study-done small, .cal-cell.studied-6.self-study-done small { color: var(--accent-ink); }
+    .cal-cell[class*='studied-']:not(.studied-0).self-study-done small { color: var(--cell-ink); }
     .cal-check-card { margin: 0 0 8px; }
     label.cal-check input[type="checkbox"]:checked { background: var(--self); border-color: var(--self); }
     label.cal-check input[type="checkbox"]:disabled { opacity: 0.6; cursor: wait; }

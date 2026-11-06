@@ -16,12 +16,16 @@
   --danger: #FF3B30;
   --self: #FF9500;        /* 自習の印 */
   --bar-rest: rgba(29, 29, 31, 0.14);
-  --heat-1: rgba(0, 122, 255, 0.10);
-  --heat-2: rgba(0, 122, 255, 0.20);
-  --heat-3: rgba(0, 122, 255, 0.32);
-  --heat-4: rgba(0, 122, 255, 0.46);
-  --heat-5: rgba(0, 122, 255, 0.66);
-  --heat-6: #007AFF;
+  --heat-1: #F9F0BA; --heat-ink-1: #000000;
+  --heat-2: #CAE298; --heat-ink-2: #000000;
+  --heat-3: #87D58E; --heat-ink-3: #000000;
+  --heat-4: #10C599; --heat-ink-4: #000000;
+  --heat-5: #15A7A4; --heat-ink-5: #000000;
+  --heat-6: #018BA3; --heat-ink-6: #000000;
+  --heat-7: #0D6FA0; --heat-ink-7: #FFFFFF;
+  --heat-8: #33528A; --heat-ink-8: #FFFFFF;
+  --heat-9: #3C3A63; --heat-ink-9: #FFFFFF;
+  /* 1日の学習時間の色：明るさが段階ごとに変わる、複数の色相の順序つきグラデーション */
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 
@@ -51,12 +55,15 @@
     --danger: #FF6961;
     --self: #FFB340;
     --bar-rest: rgba(245, 245, 247, 0.18);
-    --heat-1: rgba(10, 132, 255, 0.16);
-    --heat-2: rgba(10, 132, 255, 0.30);
-    --heat-3: rgba(10, 132, 255, 0.45);
-    --heat-4: rgba(10, 132, 255, 0.60);
-    --heat-5: rgba(10, 132, 255, 0.80);
-    --heat-6: #0A84FF;
+    --heat-1: #342D69; --heat-ink-1: #FFFFFF;
+    --heat-2: #23478D; --heat-ink-2: #FFFFFF;
+    --heat-3: #046695; --heat-ink-3: #FFFFFF;
+    --heat-4: #118197; --heat-ink-4: #000000;
+    --heat-5: #139D9A; --heat-ink-5: #000000;
+    --heat-6: #00BA91; --heat-ink-6: #000000;
+    --heat-7: #74CE7D; --heat-ink-7: #000000;
+    --heat-8: #BEDA7E; --heat-ink-8: #000000;
+    --heat-9: #F4E798; --heat-ink-9: #000000;
   }
 }
 :root[data-theme="dark"] {
@@ -71,12 +78,15 @@
   --danger: #FF6961;
   --self: #FFB340;
   --bar-rest: rgba(245, 245, 247, 0.18);
-  --heat-1: rgba(10, 132, 255, 0.16);
-  --heat-2: rgba(10, 132, 255, 0.30);
-  --heat-3: rgba(10, 132, 255, 0.45);
-  --heat-4: rgba(10, 132, 255, 0.60);
-  --heat-5: rgba(10, 132, 255, 0.80);
-  --heat-6: #0A84FF;
+  --heat-1: #342D69; --heat-ink-1: #FFFFFF;
+  --heat-2: #23478D; --heat-ink-2: #FFFFFF;
+  --heat-3: #046695; --heat-ink-3: #FFFFFF;
+  --heat-4: #118197; --heat-ink-4: #000000;
+  --heat-5: #139D9A; --heat-ink-5: #000000;
+  --heat-6: #00BA91; --heat-ink-6: #000000;
+  --heat-7: #74CE7D; --heat-ink-7: #000000;
+  --heat-8: #BEDA7E; --heat-ink-8: #000000;
+  --heat-9: #F4E798; --heat-ink-9: #000000;
 }
 
 * { box-sizing: border-box; }
@@ -900,27 +910,26 @@ details.fold[open] > summary::before { transform: rotate(45deg); }
   position: relative;
 }
 .cal-cell.empty { cursor: default; }
-.studied-1 { background: var(--heat-1); }
-.studied-2 { background: var(--heat-2); }
-.studied-3 { background: var(--heat-3); }
-.studied-4 { background: var(--heat-4); }
-.studied-5 { background: var(--heat-5); }
-.studied-6 { background: var(--heat-6); }
-.cal-cell.studied-5, .cal-cell.studied-6 { color: var(--accent-ink); font-weight: 700; }
-/* 色の段階の見本 */
-.heat-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.heat-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.heat-legend { gap: 4px 10px; }
-.heat-legend i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+.studied-1 { background: var(--heat-1); --cell-ink: var(--heat-ink-1); }
+.studied-2 { background: var(--heat-2); --cell-ink: var(--heat-ink-2); }
+.studied-3 { background: var(--heat-3); --cell-ink: var(--heat-ink-3); }
+.studied-4 { background: var(--heat-4); --cell-ink: var(--heat-ink-4); }
+.studied-5 { background: var(--heat-5); --cell-ink: var(--heat-ink-5); }
+.studied-6 { background: var(--heat-6); --cell-ink: var(--heat-ink-6); }
+.studied-7 { background: var(--heat-7); --cell-ink: var(--heat-ink-7); }
+.studied-8 { background: var(--heat-8); --cell-ink: var(--heat-ink-8); }
+.studied-9 { background: var(--heat-9); --cell-ink: var(--heat-ink-9); }
+.cal-cell[class*='studied-']:not(.studied-0) { color: var(--cell-ink); }
+.cal-cell.studied-6, .cal-cell.studied-7, .cal-cell.studied-8, .cal-cell.studied-9 { font-weight: 700; }
+/* 色の段階の見本：1本の帯と目盛り */
+.heat-legend { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; }
+.heat-bar { flex: 1; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 2px; max-width: 360px; }
+.heat-bar span { display: grid; gap: 4px; min-width: 0; }
+.heat-bar i { display: block; height: 10px; border-radius: 2px; }
+.heat-bar span:first-child i { border-radius: 5px 2px 2px 5px; }
+.heat-bar span:last-child i { border-radius: 2px 5px 5px 2px; }
+.heat-bar small, .heat-unit { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1; }
+.heat-unit { flex: none; }
 .cal-cell.today > span:first-child { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .cal-cell.in-period::after {
   content: "";
