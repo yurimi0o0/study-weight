@@ -16,10 +16,12 @@
   --danger: #FF3B30;
   --self: #FF9500;        /* 自習の印 */
   --bar-rest: rgba(29, 29, 31, 0.14);
-  --heat-1: rgba(0, 122, 255, 0.12);
-  --heat-2: rgba(0, 122, 255, 0.26);
-  --heat-3: rgba(0, 122, 255, 0.50);
-  --heat-4: #007AFF;
+  --heat-1: rgba(0, 122, 255, 0.10);
+  --heat-2: rgba(0, 122, 255, 0.20);
+  --heat-3: rgba(0, 122, 255, 0.32);
+  --heat-4: rgba(0, 122, 255, 0.46);
+  --heat-5: rgba(0, 122, 255, 0.66);
+  --heat-6: #007AFF;
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 
@@ -49,10 +51,12 @@
     --danger: #FF6961;
     --self: #FFB340;
     --bar-rest: rgba(245, 245, 247, 0.18);
-    --heat-1: rgba(10, 132, 255, 0.18);
-    --heat-2: rgba(10, 132, 255, 0.32);
-    --heat-3: rgba(10, 132, 255, 0.55);
-    --heat-4: #0A84FF;
+    --heat-1: rgba(10, 132, 255, 0.16);
+    --heat-2: rgba(10, 132, 255, 0.30);
+    --heat-3: rgba(10, 132, 255, 0.45);
+    --heat-4: rgba(10, 132, 255, 0.60);
+    --heat-5: rgba(10, 132, 255, 0.80);
+    --heat-6: #0A84FF;
   }
 }
 :root[data-theme="dark"] {
@@ -67,10 +71,12 @@
   --danger: #FF6961;
   --self: #FFB340;
   --bar-rest: rgba(245, 245, 247, 0.18);
-  --heat-1: rgba(10, 132, 255, 0.18);
-  --heat-2: rgba(10, 132, 255, 0.32);
-  --heat-3: rgba(10, 132, 255, 0.55);
-  --heat-4: #0A84FF;
+  --heat-1: rgba(10, 132, 255, 0.16);
+  --heat-2: rgba(10, 132, 255, 0.30);
+  --heat-3: rgba(10, 132, 255, 0.45);
+  --heat-4: rgba(10, 132, 255, 0.60);
+  --heat-5: rgba(10, 132, 255, 0.80);
+  --heat-6: #0A84FF;
 }
 
 * { box-sizing: border-box; }
@@ -894,10 +900,27 @@ details.fold[open] > summary::before { transform: rotate(45deg); }
   position: relative;
 }
 .cal-cell.empty { cursor: default; }
-.cal-cell.studied-1 { background: var(--heat-1); }
-.cal-cell.studied-2 { background: var(--heat-2); }
-.cal-cell.studied-3 { background: var(--heat-3); }
-.cal-cell.studied-4 { background: var(--heat-4); color: var(--accent-ink); font-weight: 700; }
+.studied-1 { background: var(--heat-1); }
+.studied-2 { background: var(--heat-2); }
+.studied-3 { background: var(--heat-3); }
+.studied-4 { background: var(--heat-4); }
+.studied-5 { background: var(--heat-5); }
+.studied-6 { background: var(--heat-6); }
+.cal-cell.studied-5, .cal-cell.studied-6 { color: var(--accent-ink); font-weight: 700; }
+/* 色の段階の見本 */
+.heat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.heat-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.heat-legend { gap: 4px 10px; }
+.heat-legend i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
 .cal-cell.today > span:first-child { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .cal-cell.in-period::after {
   content: "";
