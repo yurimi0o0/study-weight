@@ -346,7 +346,7 @@ const TL_COLORS=[
   ['#63E6E2','ミント'],['#40C8E0','ティール'],['#64D2FF','シアン'],['#0A84FF','ブルー'],
   ['#5E5CE6','インディゴ'],['#BF5AF2','パープル'],['#FF375F','ピンク'],['#AC8E68','ブラウン'],
 ];
-const validHex=h=>/^#[0-9a-fA-F]{6}$/.test(h||'')?h.toUpperCase():'';
+const validHex=h=>(typeof h==='string' && /^#[0-9a-fA-F]{6}$/.test(h))?h.toUpperCase():''; // 文字列以外（読み込んだバックアップの不正な値など）は「色なし」
 const subjectColor=id=>validHex(state.subjects.find(x=>x.id===id)?.timelineColor);
 const colorName=h=>TL_COLORS.find(c=>c[0]===h)?.[1]||h;
 // 色の上に載せる文字は、明るい色なら黒、暗い色なら白
