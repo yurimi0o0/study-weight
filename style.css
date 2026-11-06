@@ -16,16 +16,16 @@
   --danger: #FF3B30;
   --self: #FF9500;        /* 自習の印 */
   --bar-rest: rgba(29, 29, 31, 0.14);
-  --heat-1: #F9F0BA; --heat-ink-1: #000000;
-  --heat-2: #CAE298; --heat-ink-2: #000000;
-  --heat-3: #87D58E; --heat-ink-3: #000000;
-  --heat-4: #10C599; --heat-ink-4: #000000;
-  --heat-5: #15A7A4; --heat-ink-5: #000000;
-  --heat-6: #018BA3; --heat-ink-6: #000000;
-  --heat-7: #0D6FA0; --heat-ink-7: #FFFFFF;
-  --heat-8: #33528A; --heat-ink-8: #FFFFFF;
-  --heat-9: #3C3A63; --heat-ink-9: #FFFFFF;
-  /* 1日の学習時間の色：明るさが段階ごとに変わる、複数の色相の順序つきグラデーション */
+  --heat-1: #002B63; --heat-ink-1: #FFFFFF;
+  --heat-2: #003A7F; --heat-ink-2: #FFFFFF;
+  --heat-3: #00499C; --heat-ink-3: #FFFFFF;
+  --heat-4: #0159BA; --heat-ink-4: #FFFFFF;
+  --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+  --heat-6: #187CF4; --heat-ink-6: #000000;
+  --heat-7: #4091FD; --heat-ink-7: #000000;
+  --heat-8: #66A6FE; --heat-ink-8: #000000;
+  --heat-9: #8ABAFD; --heat-ink-9: #000000;
+  /* 1日の学習時間の色：青一色の濃淡。少ない日ほど黒っぽく、多い日ほど明るい青。ライトもダークも同じ */
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 
@@ -55,15 +55,15 @@
     --danger: #FF6961;
     --self: #FFB340;
     --bar-rest: rgba(245, 245, 247, 0.18);
-    --heat-1: #342D69; --heat-ink-1: #FFFFFF;
-    --heat-2: #23478D; --heat-ink-2: #FFFFFF;
-    --heat-3: #046695; --heat-ink-3: #FFFFFF;
-    --heat-4: #118197; --heat-ink-4: #000000;
-    --heat-5: #139D9A; --heat-ink-5: #000000;
-    --heat-6: #00BA91; --heat-ink-6: #000000;
-    --heat-7: #74CE7D; --heat-ink-7: #000000;
-    --heat-8: #BEDA7E; --heat-ink-8: #000000;
-    --heat-9: #F4E798; --heat-ink-9: #000000;
+    --heat-1: #002B63; --heat-ink-1: #FFFFFF;
+    --heat-2: #003A7F; --heat-ink-2: #FFFFFF;
+    --heat-3: #00499C; --heat-ink-3: #FFFFFF;
+    --heat-4: #0159BA; --heat-ink-4: #FFFFFF;
+    --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+    --heat-6: #187CF4; --heat-ink-6: #000000;
+    --heat-7: #4091FD; --heat-ink-7: #000000;
+    --heat-8: #66A6FE; --heat-ink-8: #000000;
+    --heat-9: #8ABAFD; --heat-ink-9: #000000;
   }
 }
 :root[data-theme="dark"] {
@@ -78,15 +78,15 @@
   --danger: #FF6961;
   --self: #FFB340;
   --bar-rest: rgba(245, 245, 247, 0.18);
-  --heat-1: #342D69; --heat-ink-1: #FFFFFF;
-  --heat-2: #23478D; --heat-ink-2: #FFFFFF;
-  --heat-3: #046695; --heat-ink-3: #FFFFFF;
-  --heat-4: #118197; --heat-ink-4: #000000;
-  --heat-5: #139D9A; --heat-ink-5: #000000;
-  --heat-6: #00BA91; --heat-ink-6: #000000;
-  --heat-7: #74CE7D; --heat-ink-7: #000000;
-  --heat-8: #BEDA7E; --heat-ink-8: #000000;
-  --heat-9: #F4E798; --heat-ink-9: #000000;
+  --heat-1: #002B63; --heat-ink-1: #FFFFFF;
+  --heat-2: #003A7F; --heat-ink-2: #FFFFFF;
+  --heat-3: #00499C; --heat-ink-3: #FFFFFF;
+  --heat-4: #0159BA; --heat-ink-4: #FFFFFF;
+  --heat-5: #0369DA; --heat-ink-5: #FFFFFF;
+  --heat-6: #187CF4; --heat-ink-6: #000000;
+  --heat-7: #4091FD; --heat-ink-7: #000000;
+  --heat-8: #66A6FE; --heat-ink-8: #000000;
+  --heat-9: #8ABAFD; --heat-ink-9: #000000;
 }
 
 * { box-sizing: border-box; }
