@@ -340,6 +340,16 @@ function recordOrderKey(r){
   if(createdDay===r.date){ const m=created.getHours()*60+created.getMinutes(); return m<240?m+1440:m; }
   return createdDay>r.date?99999:-1; // あとから過去の日に足した記録は、その日の一番上
 }
+// タイムラインの教科の色（Apple のシステムカラーのダークモード用。暗い背景で見やすいよう少し明るい）
+const TL_COLORS=[
+  ['#FF453A','レッド'],['#FF9F0A','オレンジ'],['#FFD60A','イエロー'],['#30D158','グリーン'],
+  ['#63E6E2','ミント'],['#40C8E0','ティール'],['#64D2FF','シアン'],['#0A84FF','ブルー'],
+  ['#5E5CE6','インディゴ'],['#BF5AF2','パープル'],['#FF375F','ピンク'],['#AC8E68','ブラウン'],
+];
+const validHex=h=>(typeof h==='string' && /^#[0-9a-fA-F]{6}$/.test(h))?h.toUpperCase():''; // 文字列以外（読み込んだバックアップの不正な値など）は「色なし」
+const subjectColor=id=>validHex(state.subjects.find(x=>x.id===id)?.timelineColor);
+const colorName=h=>TL_COLORS.find(c=>c[0]===h)?.[1]||h;
+const colorStyle=h=>h?` style='--c:${h}'`:'';
 let listMenuBound=false;
 let suppressMenuCloseUntil=0; // 長押しで開いた直後、指を離したときの合成クリックでメニューが閉じないようにする
 function renderList(){
@@ -349,7 +359,8 @@ function renderList(){
     const today=logicalDateStr(), yest=addDays(today,-1);
     const dayLabel=d=>d===today?'今日':d===yest?'昨日':fmtMD(d);
     const post=r=>{ const sub=subjectName(r.subjectId), mat=materialName(r.materialId); const t=r.startTime||r.endTime||'';
-      return `<article class='post' data-id='${r.id}'>
+      const col=subjectColor(r.subjectId);
+      return `<article class='post${col?' tinted':''}' data-id='${r.id}'${colorStyle(col)}>
       <div class='avatar' aria-hidden='true'>${escapeHtml(sub.slice(0,1))}</div>
       <div class='post-body'>
         <div class='post-head'><b class='post-name'>${escapeHtml(sub)}</b>${mat?`<span class='post-sub'>${escapeHtml(mat)}</span>`:''}<time class='post-time' datetime='${r.date}'>${dayLabel(r.date)}${t?` ${t}`:''}</time><button class='post-more' data-id='${r.id}' aria-label='この記録の操作' aria-haspopup='menu' aria-expanded='false'>${ICON_MORE}</button></div>
@@ -782,6 +793,7 @@ async function sendTestPush(){
   } catch (err) { console.error('sendTestPush failed:', err); alert(`送信に失敗しました: ${err.message || err}`); }
 }
 
+let openColorSubject=null;
 function settingsBackHtml(title){ return `<button type='button' class='back-btn' id='backSettings'>${ICON_BACK}設定</button><h2 style='margin:0 4px 16px'>${title}</h2>`; }
 function bindSettingsBack(){ const b=$('#backSettings'); if(b) b.onclick=()=>renderSettings('menu'); }
 function notifyPermissionLabel(){
@@ -835,6 +847,32 @@ function renderSettings(mode=state.settingsMode||'menu'){
     $('#pushUnregister').onclick=unregisterPush;
     return;
   }
+  if(mode==='colors'){
+    el.innerHTML=`${settingsBackHtml('タイムラインの色')}
+    <section class='surface menu'>${state.subjects.map(sub=>{ const col=validHex(sub.timelineColor); const open=openColorSubject===sub.id;
+      return `<div class='color-item'>
+        <button class='menu-row color-row' data-id='${sub.id}' aria-expanded='${open}'><span class='avatar small${col?' filled':''}'${colorStyle(col)} aria-hidden='true'>${escapeHtml((sub.name||'').slice(0,1))}</span><span>${escapeHtml(sub.name)}</span><span class='value'>${col?escapeHtml(colorName(col)):'なし'}</span>${ICON_CHEV}</button>
+        ${open?`<div class='color-panel' role='group' aria-label='${attr(sub.name)}の色'>
+          <div class='swatches'>
+            <button class='swatch none' data-color='' aria-label='色なし' aria-pressed='${!col}'></button>
+            ${TL_COLORS.map(([h,n])=>`<button class='swatch' data-color='${h}' style='--c:${h}' aria-label='${n}' aria-pressed='${col===h}'></button>`).join('')}
+          </div>
+          <label class='custom-color'><span>自分で選ぶ</span><input type='color' class='color-input' value='${col||'#0A84FF'}'/></label>
+        </div>`:''}
+      </div>`; }).join('')}</section>`;
+    bindSettingsBack();
+    const saveColor=async(id,hex)=>{
+      const v=validHex(hex)||null;
+      try{ await updateDoc(userDoc('subjects',id),{timelineColor:v,updatedAt:new Date().toISOString()}); }
+      catch(err){ console.error(err); return alert('色を保存できませんでした。通信環境を確認して、もう一度お試しください。'); }
+      const sub=state.subjects.find(x=>x.id===id); if(sub) sub.timelineColor=v; // 読み込み直しを待たずに反映
+      renderSettings('colors');
+    };
+    el.querySelectorAll('.color-row').forEach(b=>b.onclick=()=>{ openColorSubject=openColorSubject===b.dataset.id?null:b.dataset.id; renderSettings('colors'); });
+    el.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>saveColor(openColorSubject,b.dataset.color));
+    el.querySelectorAll('.color-input').forEach(i=>i.onchange=()=>saveColor(openColorSubject,i.value));
+    return;
+  }
   if(mode==='about'){
     el.innerHTML=`${settingsBackHtml('データの保存先')}
     <section class='surface'><p style='margin:0;font-size:var(--fs-cap);line-height:1.8'>このアプリは、ログインした利用者の学習記録をFirebase Cloud Firestoreに保存し、PCとiPhoneなど複数端末で同期します。学習記録、教材名、メモなどのデータは、ログインした本人のデータとして保存されます。Firestore Security Rulesにより、各ユーザーは自分のデータのみ読み書きできる設計にしてください。なお、端末やブラウザ上にもPWAのキャッシュや一時データが保存される場合があります。必要に応じてJSONエクスポート機能でバックアップしてください。</p></section>`;
@@ -847,7 +885,7 @@ function renderSettings(mode=state.settingsMode||'menu'){
   <div class='group-title'>データ</div>
   <section class='surface menu'>${menuRow('openManage','教科・教材・ラベル',`${state.subjects.length}教科`)}${menuRow('openBackup','バックアップ')}</section>
   <div class='group-title'>記録</div>
-  <section class='surface menu'>${menuRow('openQuality','質係数',['S','A','B','C','D'].map(k=>`${k} ${q[k]}`).join('  '))}</section>
+  <section class='surface menu'>${menuRow('openColors','タイムラインの色')}${menuRow('openQuality','質係数',['S','A','B','C','D'].map(k=>`${k} ${q[k]}`).join('  '))}</section>
   <div class='group-title'>通知</div>
   <section class='surface menu'>${menuRow('openNotify','通知',notifyPermissionLabel())}</section>
   <div class='group-title'>このアプリについて</div>
@@ -858,6 +896,7 @@ function renderSettings(mode=state.settingsMode||'menu'){
   $('#openQuality').onclick=()=>renderSettings('quality');
   $('#openNotify').onclick=()=>renderSettings('notify');
   $('#openAbout').onclick=()=>renderSettings('about');
+  $('#openColors').onclick=()=>renderSettings('colors');
   $('#settingsLogout').onclick=()=>signOut(auth);
   bindSettingsPanelActions();
 }

@@ -1020,3 +1020,66 @@ label.list-item:has(input:focus-visible),
   .menu { padding-left: 16px; }
   .menu-row { padding-right: 16px; }
 }
+
+/* ---------- 教科の色（タイムライン） ---------- */
+:root { --tint: 12%; --avatar-ink: #000000; } /* 色を塗った丸の文字は、ライトでもダークでも黒 */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tint: 16%; } }
+:root[data-theme="dark"] { --tint: 16%; }
+/* 背景は面の色に少しだけ混ぜる。暗い画面でも鮮やかな色でベタ塗りしない */
+.post.tinted { background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); }
+.post.tinted .avatar, .avatar.filled { background: var(--c); color: var(--avatar-ink); }
+@media (min-width: 720px) {
+  .post:first-child { border-top-left-radius: var(--r-surface); border-top-right-radius: var(--r-surface); }
+  .post:last-child { border-bottom-left-radius: var(--r-surface); border-bottom-right-radius: var(--r-surface); }
+}
+
+/* 設定：タイムラインの色 */
+.color-item + .color-item .color-row { border-top: 1px solid var(--line); }
+.color-row { gap: 12px; }
+.color-row > span:nth-child(2) { flex: 1; min-width: 0; }
+.avatar.small { width: 32px; height: 32px; font-size: var(--fs-cap); flex: none; }
+.color-row .value { margin-left: 0; }
+.color-panel { padding: 4px 20px 16px 44px; }
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 8px;
+  max-width: 400px;
+}
+.swatch {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  background: var(--c);
+  cursor: pointer;
+  justify-self: center;
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.swatch.none {
+  background: linear-gradient(135deg, transparent calc(50% - 1px), var(--muted) calc(50% - 1px), var(--muted) calc(50% + 1px), transparent calc(50% + 1px)), var(--field);
+}
+.swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.custom-color {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 0;
+  max-width: 400px;
+  color: var(--ink);
+  font-size: var(--fs-body);
+  font-weight: 400;
+}
+.custom-color input[type="color"] {
+  width: 64px;
+  min-width: 64px;
+  height: 36px;
+  min-height: 36px;
+  padding: 2px;
+  border-radius: var(--r-field);
+  cursor: pointer;
+}
+@media (max-width: 380px) { .color-panel { padding-left: 16px; padding-right: 16px; } }
